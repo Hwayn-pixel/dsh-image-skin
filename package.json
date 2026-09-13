@@ -1,0 +1,74 @@
+{
+  "name": "dsh-image-skin",
+  "version": "0.1.0",
+  "description": "Image skin for the DSH (DeepSeek Harness) web UI — replace large UI regions (window / center / sidebar / welcome / rightpanel / composer) with your own images or video, plus draggable stickers, from a settings submenu.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": { "inject": [], "platform": "web" }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "cordis-plugin",
+    "plugin",
+    "web-ui",
+    "theme",
+    "skin",
+    "wallpaper",
+    "background"
+  ],
+  "license": "MIT",
+  "author": "dsh-image-skin contributors",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/CHANGE-ME/dsh-image-skin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CHANGE-ME/dsh-image-skin/issues"
+  },
+  "homepage": "https://github.com/CHANGE-ME/dsh-image-skin#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.3",
+    "@types/node": "22",
+    "@types/react": "~18.3.1",
+    "react": "18.2.0"
+  },
+  "files": [
+    "lib",
+    "src",
+    "scripts",
+    "test",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "test": "node test/host.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "install-plugin": "node scripts/install.mjs",
+    "prepublishOnly": "node build.mjs"
+  }
+}
