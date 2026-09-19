@@ -55,9 +55,9 @@ let dsh = findDsh();
 if (!dsh) {
   if (dryRun) {
     dsh = "dsh";
-    console.warn("[dsh-image-skin] 警告：未找到 dsh CLI（--dry-run 仅预览）。");
+    console.warn("[dsh-image-skin] warning: dsh CLI not found (--dry-run, preview only).");
   } else {
-    console.error("[dsh-image-skin] 未找到 dsh CLI。请安装 DeepSeek Harness 或把 dsh 加入 PATH。");
+    console.error("[dsh-image-skin] dsh CLI not found. Install DeepSeek Harness or add dsh to PATH.");
     process.exit(1);
   }
 }
@@ -67,19 +67,19 @@ function run(label, cmd, cmdArgs, opts = {}) {
   if (dryRun) return;
   const res = spawnSync(cmd, cmdArgs, { stdio: "inherit", ...opts });
   if (res.status !== 0) {
-    console.error(`[dsh-image-skin] x ${label} 失败（exit ${res.status}）。`);
+    console.error(`[dsh-image-skin] error: ${label} failed (exit ${res.status}).`);
     process.exit(res.status ?? 1);
   }
-  console.log(`[dsh-image-skin] + ${label} 完成`);
+  console.log(`[dsh-image-skin] done: ${label}`);
 }
 
-console.log(`[dsh-image-skin] 安装：profile=${profile} dir=${pluginDir}`);
+console.log(`[dsh-image-skin] installing: profile=${profile} dir=${pluginDir}`);
 console.log(`[dsh-image-skin] dsh CLI: ${dsh}`);
 
 if (!skipAdd) {
   const addArgs = ["plugin", "--profile", profile, "add", "-w", pluginDir];
-  run("注册 bundle 到 profile", dsh, addArgs, isWin ? { shell: true } : {});
+  run("register bundle into profile", dsh, addArgs, isWin ? { shell: true } : {});
 }
 
-console.log("\n[dsh-image-skin] 安装完成。");
-console.log("[dsh-image-skin] 下一步：重启 dsh web 让配置生效（dsh web 或 dsh --profile " + profile + "）。");
+console.log("\n[dsh-image-skin] installed.");
+console.log("[dsh-image-skin] next: restart the web host so the profile is recomposed (dsh web, or dsh --profile " + profile + ").");
