@@ -102,6 +102,12 @@ preference-write entry — rather than styling around it. Every area resolves it
 shared field stays the lightweight default. `resolveAreaImage` is exported purely so the offline
 client test can pin that fallback order.
 
+The settings page is deliberately two-level: a mode picker (two large buttons) that also switches the
+live theme — so configuring light mode shows light mode — leading into one identical image menu per
+mode. The sidebar-foot switch is the same state source in a different size: registered in
+`sidebar.footer.action`, it measures the tallest sibling button (the Settings trigger) and matches
+that height so the two read as equally sized neighbours.
+
 **Video speed.** One `videoPlaybackRate` value is applied to every video the plugin renders — the
 window layer and sticker videos — on both `playbackRate` (live) and `defaultPlaybackRate` (survives a
 `src` swap). The slider previews it against the live elements before the debounced write lands.

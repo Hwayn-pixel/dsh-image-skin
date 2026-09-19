@@ -628,13 +628,12 @@ function makeModeStore(theme?: ThemeFace): ModeStore {
   };
 }
 
-/** Compact sun/moon slider. It drives the real DSH theme preference. */
-function ModeSlider(props: { mode: Mode; onPick: (m: Mode) => void; compact?: boolean }): React.ReactElement {
+/** Sun glyph, drawn from primitives (no icon font, no image asset). */
+function SunIcon(props: { size: number }): React.ReactElement {
   const h = React.createElement;
-  const maskId = React.useMemo(() => `dsh-skin-moon-${Math.random().toString(36).slice(2, 8)}`, []);
-  const sun = h(
+  return h(
     "svg",
-    { key: "sun", width: 15, height: 15, viewBox: "0 0 24 24", "aria-hidden": "true" },
+    { width: props.size, height: props.size, viewBox: "0 0 24 24", "aria-hidden": "true" },
     h("circle", { cx: 12, cy: 12, r: 4.6, fill: "currentColor" }),
     ...[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
       const rad = (deg * Math.PI) / 180;
@@ -650,26 +649,97 @@ function ModeSlider(props: { mode: Mode; onPick: (m: Mode) => void; compact?: bo
       });
     }),
   );
-  const moon = h(
+}
+
+/** Crescent moon, drawn as a masked disc with a per-instance mask id. */
+function MoonIcon(props: { size: number }): React.ReactElement {
+  const h = React.createElement;
+  const maskId = React.useMemo(() => `dsh-skin-moon-${Math.random().toString(36).slice(2, 8)}`, []);
+  return h(
     "svg",
-    { key: "moon", width: 15, height: 15, viewBox: "0 0 24 24", "aria-hidden": "true" },
+    { width: props.size, height: props.size, viewBox: "0 0 24 24", "aria-hidden": "true" },
     h(
       "mask",
-      { id: maskId, key: "mask" },
+      { id: maskId },
       h("rect", { x: 0, y: 0, width: 24, height: 24, fill: "#fff" }),
       h("circle", { cx: 16.5, cy: 8.5, r: 7.7, fill: "#000" }),
     ),
     h("circle", { cx: 12, cy: 12, r: 8.3, fill: "currentColor", mask: `url(#${maskId})` }),
   );
-  const side = (m: Mode, icon: React.ReactElement, text: string) =>
-    h(
-      "button",
+}
+
+const modeLabel = (m: Mode): string => (m === "dark" ? "深色模式" : "浅色模式");
+
+/**
+ * Light/dark control, in two sizes:
+ *  - `footer` — the switch beside Settings in the sidebar foot. It measures the tallest
+ *    sibling button (the Settings trigger) and matches that height, so the two read as
+ *    equally sized neighbours.
+ *  - `card` — the two large entry buttons at the top of the plugin's settings page, which
+ *    lead into the per-mode image menus.
+ */
+function ModeSwitch(props: { mode: Mode; onPick: (m: Mode) => void; variant: "footer" | "card" }): React.ReactElement {
+  const h = React.createElement;
+
+  if (props.variant === "card") {
+    return h(
+      "div",
+      { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 } },
+      ...(["light", "dark"] as Mode[]).map((m) => {
+        const active = props.mode === m;
+        return h(
+          "button",
+          {
+            key: m,
+            type: "button",
+            "aria-pressed": active,
+            onClick: () => props.onPick(m),
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              padding: "18px 12px",
+              cursor: "pointer",
+              font: "inherit",
+              borderRadius: 14,
+              border: `1px solid ${active ? "var(--dsw-alias-brand-primary,#5aa7d8)" : "var(--dsw-alias-border-l2,rgba(128,128,128,.3))"}`,
+              background: active ? "var(--dsw-alias-brand-primary,#5aa7d8)" : "var(--dsw-alias-bg-layer-2,rgba(128,128,128,.08))",
+              color: active ? "#fff" : "inherit",
+            },
+          },
+          h(m === "dark" ? MoonIcon : SunIcon, { size: 30 }),
+          h("span", { style: { fontWeight: 600 } }, modeLabel(m)),
+          h("small", { style: { opacity: 0.75 } }, active ? "正在使用" : "点击进入"),
+        );
+      }),
+    );
+  }
+
+  const ref = React.useRef<HTMLButtonElement | null>(null);
+  const [height, setHeight] = React.useState<number | null>(null);
+  React.useEffect(() => {
+    const mine = ref.current;
+    if (!mine) return;
+    let node: HTMLElement | null = mine.parentElement;
+    for (let depth = 0; depth < 3 && node; depth++) {
+      const others = Array.from(node.querySelectorAll("button")).filter((b) => b !== mine && !mine!.contains(b));
+      if (others.length > 0) {
+        const tallest = others.reduce((acc, b) => Math.max(acc, b.getBoundingClientRect().height), 0);
+        if (tallest > 0) setHeight(Math.round(tallest));
+        break;
+      }
+      node = node.parentElement;
+    }
+  }, []);
+  const cell = (m: Mode) => {
+    const active = props.mode === m;
+    return h(
+      "span",
       {
         key: m,
-        type: "button",
-        title: text,
-        "aria-label": text,
-        "aria-pressed": props.mode === m,
+        title: modeLabel(m),
         onClick: (e: any) => {
           e.stopPropagation();
           props.onPick(m);
@@ -678,37 +748,44 @@ function ModeSlider(props: { mode: Mode; onPick: (m: Mode) => void; compact?: bo
           display: "inline-flex",
           alignItems: "center",
           justifyContent: "center",
-          width: props.compact ? 22 : 26,
-          height: props.compact ? 18 : 22,
-          padding: 0,
-          border: "none",
-          borderRadius: 999,
-          cursor: "pointer",
-          background: props.mode === m ? "var(--dsw-alias-brand-primary,#5aa7d8)" : "transparent",
-          color: props.mode === m ? "#fff" : "var(--dsw-alias-label-secondary,currentColor)",
+          width: 30,
+          alignSelf: "stretch",
+          borderRadius: 8,
+          background: active ? "var(--dsw-alias-brand-primary,#5aa7d8)" : "transparent",
+          color: active ? "#fff" : "var(--dsw-alias-label-secondary,currentColor)",
           transition: "background 160ms ease, color 160ms ease",
         },
       },
-      icon,
+      h(m === "dark" ? MoonIcon : SunIcon, { size: 17 }),
     );
+  };
   return h(
-    "div",
+    "button",
     {
-      role: "group",
+      ref,
+      type: "button",
+      title: `切换到${props.mode === "dark" ? "浅色" : "深色"}模式`,
       "aria-label": "浅色 / 深色模式",
-      title: props.mode === "dark" ? "当前：深色模式" : "当前：浅色模式",
+      onClick: () => props.onPick(props.mode === "dark" ? "light" : "dark"),
       style: {
         display: "inline-flex",
-        alignItems: "center",
+        alignItems: "stretch",
+        justifyContent: "center",
         gap: 2,
         padding: 2,
-        borderRadius: 999,
+        margin: 0,
+        height: height ? `${height}px` : "100%",
+        minHeight: 30,
+        minWidth: 66,
+        alignSelf: "stretch",
+        cursor: "pointer",
+        borderRadius: 10,
         border: "1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3))",
         background: "var(--dsw-alias-bg-layer-2,rgba(128,128,128,.10))",
       },
     },
-    side("light", sun, "浅色模式"),
-    side("dark", moon, "深色模式"),
+    cell("light"),
+    cell("dark"),
   );
 }
 
@@ -783,7 +860,6 @@ function AreaRow(props: {
   onToggleEdit: (id: string) => void;
 }): React.ReactElement {
   const h = React.createElement;
-  const [sharedTarget, setSharedTarget] = React.useState(false);
   const area = props.area;
   const v = props.value;
   const modeWord = props.mode === "dark" ? "深色" : "浅色";
@@ -792,11 +868,10 @@ function AreaRow(props: {
   const specific = String(v[specificField] ?? "");
   const sharedImage = String(v[sharedField] ?? "");
   const effective = resolveAreaImage(v, area.id, props.mode);
-  const source = specific ? `${modeWord}专用` : sharedImage ? "共用" : "未设置";
+  const source = specific ? `${modeWord}专用` : sharedImage ? "共用图（两个模式都用）" : "未设置";
   const enabled = v[`${area.id}Enabled`] !== false;
   const fit = String(v[`${area.id}Fit`] ?? "cover");
   const isVideo = effective.length > 0 && VIDEO_RE.test(effective);
-  const targetField = sharedTarget ? sharedField : specificField;
   const button = (key: string, label: string, onClick: () => void, active = false) =>
     h("button", { key, type: "button", className: "dshImgSkin-btn", "data-active": String(active), onClick }, label);
   return h(
@@ -831,28 +906,22 @@ function AreaRow(props: {
       "div",
       { className: "dshImgSkin-actions" },
       h(
-        "span",
-        { className: "dshImgSkin-actions", title: "上传写入哪个字段" },
-        button("mode-target", `${modeWord}专用`, () => setSharedTarget(false), !sharedTarget),
-        button("shared-target", "共用", () => setSharedTarget(true), sharedTarget),
-      ),
-      h(
         "label",
         { className: "dshImgSkin-btn" },
-        props.busyField === targetField ? "上传中…" : "上传图片/视频(GIF)",
+        props.busyField === specificField ? "上传中…" : `上传${modeWord}模式图片/视频`,
         h("input", {
           type: "file",
           accept: "image/*,video/*",
           style: { display: "none" },
           onChange: (e: any) => {
             const file = e.target.files?.[0];
-            if (file) props.onPick(file, targetField);
+            if (file) props.onPick(file, specificField);
             e.target.value = "";
           },
         }),
       ),
-      specific ? button("clear-mode", "清除本模式", () => props.onClear(specificField)) : null,
-      sharedImage && !sharedTarget ? button("clear-shared", "清除共用图", () => props.onClear(sharedField)) : null,
+      specific ? button("clear-mode", "清除", () => props.onClear(specificField)) : null,
+      !specific && sharedImage ? button("clear-shared", "清除共用图", () => props.onClear(sharedField)) : null,
       area.kind === "region"
         ? h(
             "select",
@@ -922,6 +991,8 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
     const [editingId, setEditingId] = React.useState<string | null>(currentEditing);
     const [notice, setNotice] = React.useState<string | null>(null);
     const [gcStatus, setGcStatus] = React.useState<string | null>(null);
+    // Level 2 = the mode picker (plus the global sliders); level 3 = one mode's image menu.
+    const [view, setView] = React.useState<"menu" | "mode">("menu");
 
     const upload = async (field: string, file: File) => {
       setNotice(null);
@@ -965,48 +1036,78 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
         { className: "dshImgSkin-hint" },
         "给每个区域/角标上传图片。图片只存在本机（$DSH_HOME/image-skin），不会上传到外部服务。角标可点「编辑位置」后拖动/缩放。",
       ),
-      h(
-        "div",
-        { className: "dshImgSkin-row" },
-        h(
-          "div",
-          { className: "dshImgSkin-head" },
-          h(
+      notice ? h("p", { className: "dshImgSkin-hint", style: { color: "#d9534f" } }, notice) : null,
+      view === "menu"
+        ? h(
             "div",
-            null,
-            h("span", { className: "dshImgSkin-title" }, "浅色 / 深色模式"),
+            { className: "dshImgSkin-row" },
             h(
-              "small",
-              { className: "dshImgSkin-hint" },
-              `当前是${mode === "dark" ? "深色" : "浅色"}模式：上传默认只作用于这个模式；每个区域都能再存一份「共用」图给两个模式用。这个滑块切的是 DSH 主题本身，所以外部切换它也会跟着变。`,
+              "div",
+              { className: "dshImgSkin-head" },
+              h(
+                "div",
+                null,
+                h("span", { className: "dshImgSkin-title" }, "选择要配置的模式"),
+                h(
+                  "small",
+                  { className: "dshImgSkin-hint" },
+                  "浅色和深色各有一套独立的图，互不影响。点下面的按钮会同时把界面切到该模式，边配边看。",
+                ),
+              ),
+            ),
+            h(ModeSwitch, {
+              mode,
+              variant: "card",
+              onPick: (m: Mode) => {
+                modeStore.pick(m);
+                setView("mode");
+              },
+            }),
+          )
+        : h(
+            "div",
+            { className: "dshImgSkin-row" },
+            h(
+              "div",
+              { className: "dshImgSkin-head" },
+              h(
+                "div",
+                null,
+                h("span", { className: "dshImgSkin-title" }, `${mode === "dark" ? "深色" : "浅色"}模式 · 区域配图`),
+                h("small", { className: "dshImgSkin-hint" }, "这里的每一项都只作用于当前模式；点「返回」回到模式选择。"),
+              ),
+              h("button", { className: "dshImgSkin-btn", type: "button", onClick: () => setView("menu") }, "← 返回"),
             ),
           ),
-          h(ModeSlider, { mode, onPick: (m: Mode) => modeStore.pick(m) }),
-        ),
-      ),
-      h(SliderRow, {
-        title: "面板不透明度",
-        hint: "越低越能透出壁纸；角标贴图会同步变淡，壁纸本身不受影响",
-        value: Number(v.panelOpacity ?? 100),
-        min: 0,
-        max: 100,
-        step: 1,
-        format: (n: number) => `${n}%`,
-        onPreview: (n: number) => applyPanelOpacity({ ...v, panelOpacity: n }, mode),
-        onCommit: (n: number) => void scope.set("panelOpacity", n),
-      }),
-      h(SliderRow, {
-        title: "视频播放速率",
-        hint: "作用于上传的视频（窗口壁纸与角标视频），拖动即时生效",
-        value: Number(v.videoPlaybackRate ?? 1),
-        min: 0.25,
-        max: 3,
-        step: 0.25,
-        format: (n: number) => `${n}×`,
-        onPreview: (n: number) => previewVideoRate(n),
-        onCommit: (n: number) => void scope.set("videoPlaybackRate", n),
-      }),
-      notice ? h("p", { className: "dshImgSkin-hint", style: { color: "#d9534f" } }, notice) : null,
+      view === "menu"
+        ? h(SliderRow, {
+            key: "opacity",
+            title: "面板不透明度",
+            hint: "越低越能透出壁纸；角标贴图会同步变淡，壁纸本身不受影响",
+            value: Number(v.panelOpacity ?? 100),
+            min: 0,
+            max: 100,
+            step: 1,
+            format: (n: number) => `${n}%`,
+            onPreview: (n: number) => applyPanelOpacity({ ...v, panelOpacity: n }, mode),
+            onCommit: (n: number) => void scope.set("panelOpacity", n),
+          })
+        : null,
+      view === "menu"
+        ? h(SliderRow, {
+            key: "rate",
+            title: "视频播放速率",
+            hint: "作用于上传的视频（窗口壁纸与角标视频），拖动即时生效",
+            value: Number(v.videoPlaybackRate ?? 1),
+            min: 0.25,
+            max: 3,
+            step: 0.25,
+            format: (n: number) => `${n}×`,
+            onPreview: (n: number) => previewVideoRate(n),
+            onCommit: (n: number) => void scope.set("videoPlaybackRate", n),
+          })
+        : null,
+      view === "menu" &&
       h(
         "div",
         { className: "dshImgSkin-row" },
@@ -1047,7 +1148,8 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
         ),
         gcStatus ? h("small", { className: "dshImgSkin-hint" }, gcStatus) : null,
       ),
-      ...AREAS.map((area) =>
+      view === "mode" &&
+      AREAS.map((area) =>
         h(AreaRow, {
           key: area.id,
           area,
@@ -1176,13 +1278,14 @@ export function apply(ctx: ClientContext): void {
     ),
   );
 
-  // Small sun/moon slider beside Settings at the sidebar foot (`sidebar.footer.action`).
+  // Light/dark switch beside Settings at the sidebar foot (`sidebar.footer.action`). It
+  // measures the Settings button and matches its height, so the two read as peers.
   function ModeAction(): React.ReactElement {
     const mode = React.useSyncExternalStore(modeStore.subscribe, modeStore.get);
-    return React.createElement(ModeSlider, {
+    return React.createElement(ModeSwitch, {
       mode,
+      variant: "footer",
       onPick: (m: Mode) => modeStore.pick(m),
-      compact: true,
     });
   }
   ctx.slots.inject("sidebar.footer.action", () =>

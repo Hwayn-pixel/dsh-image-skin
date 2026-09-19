@@ -16,11 +16,14 @@ hardens it for public use, with an offline test suite for the host half.
   a file that was just uploaded but not committed to settings yet.
 - Streaming upload cap (`MAX_UPLOAD_BYTES`, 32 MB request body) answering `413` while the body is
   still arriving, plus a matching 24 MB pre-check and a visible error message in the settings page.
-- **Per-mode artwork.** Every area gained `<area>ImageLight` / `<area>ImageDark` next to the shared
-  `<area>Image`; resolution is mode-specific first, shared as the fallback, so a config written before
-  this change keeps working. A sun/moon slider — registered in `sidebar.footer.action` (beside
-  Settings) and mirrored in the settings page — writes the real DSH theme preference through the
-  `theme` service, and follows `theme/change` when the theme is switched elsewhere.
+- **Per-mode artwork.** The settings page became two levels: two large **浅色模式 / 深色模式** buttons at
+  the top of the plugin page open one identical image menu per mode, so each scheme has its own set of
+  images. Entering a mode also switches the live theme, so what you configure is what you see. Every
+  area gained `<area>ImageLight` / `<area>ImageDark` next to the shared `<area>Image`; resolution is
+  mode-specific first, shared as the fallback, so a config written before this change keeps working.
+  A sun/moon switch lives in `sidebar.footer.action` (beside Settings, sized to match it), writes the
+  DSH theme preference through `setTheme`, and follows `theme/change` when the theme is switched
+  elsewhere.
 - **Video playback rate.** `videoPlaybackRate` drives `playbackRate` / `defaultPlaybackRate` on the
   window video and on sticker videos. Sticker areas now render a `<video>` for video URLs instead of
   an `<img>` that silently showed nothing.

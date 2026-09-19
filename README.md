@@ -10,9 +10,11 @@ sidebar and the composer. Everything is configured from a settings submenu and s
 
 - **Per-region artwork** — window backdrop (static image, GIF, or `mp4`/`webm` video), center column,
   sidebar, welcome / empty state, right panel, composer area.
-- **Per-mode artwork** — a compact sun/moon slider (in the settings page **and** beside Settings at the
-  sidebar foot) switches the real DSH theme. Every area can hold a light-only image, a dark-only
-  image, or one shared image; a mode-specific image wins and the shared one is the fallback.
+- **Per-mode artwork** — the settings page opens with two large buttons, **浅色模式 / 深色模式**, each
+  leading into its own identical menu for that mode's images, so light and dark are configured
+  completely separately. A sun/moon switch beside Settings at the sidebar foot toggles the real DSH
+  theme and is sized to match the Settings button. Areas with no image for a mode fall back to the
+  shared one, so a config from before per-mode support keeps working.
 - **Video playback rate** — one slider sets the playback speed of every video the plugin renders
   (window wallpaper and sticker videos), applied live and remembered across restarts.
 - **Two draggable stickers** — anchor an image to the composer seat or the sidebar column; drag to
