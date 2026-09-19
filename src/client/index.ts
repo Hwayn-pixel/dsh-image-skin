@@ -122,14 +122,31 @@ function ensureBaseStyles(): void {
     ".dshImgSkin-btn[disabled]{opacity:.5;cursor:not-allowed}",
     ".dshImgSkin-btn[data-active='true']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);color:var(--dsw-alias-brand-primary,#5aa7d8)}",
     "[data-dsh-skin-editing='true']{outline:2px dashed var(--dsw-alias-brand-primary,#5aa7d8);outline-offset:2px}",
-    // Theme switch: for one short window, every colour-bearing property transitions, so
-    // light <-> dark cross-fades instead of snapping. Animations are untouched; only the
-    // transition longhands are forced, and only while the attribute is present.
-    `body[${THEME_ANIM_ATTR}],body[${THEME_ANIM_ATTR}] *,body[${THEME_ANIM_ATTR}] *::before,body[${THEME_ANIM_ATTR}] *::after{`,
-    "transition-property:background-color,color,border-color,outline-color,fill,stroke,box-shadow !important;",
+    // Theme switch: for one short window the palette transitions instead of snapping.
+    //
+    // background-color / color / border-color are *not* compositor properties: the browser
+    // recalculates style and repaints every frame the transition runs. Animating "every
+    // element" is therefore fine on a short screen and hopeless on a long conversation, so
+    // there are two scopes and startThemeAnimation() picks one by DOM size:
+    //   full — body + every descendant (small documents);
+    //   lite — body + the big surfaces only, so the panels melt while the thousands of inner
+    //          nodes snap instead of dragging the whole frame rate down with them.
+    // `fill`/`stroke` are redundant (icons inherit `currentColor`), shadows barely differ
+    // between the two palettes, and pseudo-elements doubled the matched-element count.
+    `body[${THEME_ANIM_ATTR}="full"],body[${THEME_ANIM_ATTR}="full"] *,`,
+    `body[${THEME_ANIM_ATTR}="lite"],`,
+    `body[${THEME_ANIM_ATTR}="lite"] [class*="_sidebarCol"],`,
+    `body[${THEME_ANIM_ATTR}="lite"] [class*="_centerCol"],`,
+    `body[${THEME_ANIM_ATTR}="lite"] [class*="_pane"],`,
+    `body[${THEME_ANIM_ATTR}="lite"] [class*="_panelBody"],`,
+    `body[${THEME_ANIM_ATTR}="lite"] [class*="_composerSeat"],`,
+    `body[${THEME_ANIM_ATTR}="lite"] [class*="_hero"]{`,
+    "transition-property:background-color,color,border-color !important;",
     `transition-duration:${THEME_ANIM_MS}ms !important;`,
     "transition-timing-function:cubic-bezier(.4,0,.2,1) !important;",
     "transition-delay:0s !important;}",
+    // Users who ask for reduced motion get a plain switch.
+    `@media (prefers-reduced-motion:reduce){body[${THEME_ANIM_ATTR}],body[${THEME_ANIM_ATTR}] *{transition:none !important}}`,
   ].join("");
   document.head.append(style);
 }
@@ -193,14 +210,20 @@ function previewVideoRate(rate: number): void {
 let themeAnimTimer: ReturnType<typeof setTimeout> | null = null;
 /** What the window layer is currently showing, so a mode switch can cross-fade from it. */
 let paintedWindowImage: string | null = null;
+/** Last rendered sticker signature per area, so an unchanged sticker is never rebuilt. */
+const stickerSignatures: Record<string, string> = {};
+
+/** Above this many elements the transition is scoped to the big surfaces only. */
+const THEME_ANIM_HEAVY_ELEMENTS = 1500;
 
 /**
- * Open a short window in which colour-bearing properties transition. Called immediately
- * *before* the theme changes, so the transition is already in place when new values land.
+ * Open a short window in which colours transition. Called immediately *before* the theme
+ * changes, so the transition is already in place when new values land.
  */
 function startThemeAnimation(): void {
   const body = document.body;
-  body.setAttribute(THEME_ANIM_ATTR, "");
+  const heavy = body.getElementsByTagName("*").length > THEME_ANIM_HEAVY_ELEMENTS;
+  body.setAttribute(THEME_ANIM_ATTR, heavy ? "lite" : "full");
   if (themeAnimTimer) clearTimeout(themeAnimTimer);
   themeAnimTimer = setTimeout(() => {
     themeAnimTimer = null;
@@ -494,9 +517,18 @@ function attachDrag(
 }
 
 function applySticker(area: AreaDef, value: SkinValue, mode: Mode, editing: boolean, commit: Commit): void {
-  document.querySelectorAll<HTMLElement>(`[data-dsh-skin-sticker="${area.id}"]`).forEach((el) => el.remove());
   const image = resolveAreaImage(value, area.id, mode);
   const on = value.enabled !== false && value[`${area.id}Enabled`] !== false && image.length > 0;
+  const scale = Number(value[`${area.id}Scale`] ?? 100) / 100;
+  const dx = Number(value[`${area.id}OffsetX`] ?? 0);
+  const dy = Number(value[`${area.id}OffsetY`] ?? 0);
+  // Rebuilding a sticker re-decodes its image and restarts a sticker video, so if nothing
+  // that affects it changed and it is still mounted, leave it exactly where it is.
+  const signature = `${on ? image : "-"}|${scale}|${dx}|${dy}|${editing}`;
+  const mounted = document.querySelector<HTMLElement>(`[data-dsh-skin-sticker="${area.id}"]`);
+  if (stickerSignatures[area.id] === signature && (!on || mounted)) return;
+  stickerSignatures[area.id] = signature;
+  document.querySelectorAll<HTMLElement>(`[data-dsh-skin-sticker="${area.id}"]`).forEach((el) => el.remove());
   if (!on || !area.sel) return;
   const target = document.querySelector<HTMLElement>(area.sel);
   if (!target) return;
@@ -504,9 +536,6 @@ function applySticker(area: AreaDef, value: SkinValue, mode: Mode, editing: bool
     target.style.position = "relative";
     target.setAttribute("data-dsh-skin-sticker-host", "");
   }
-  const scale = Number(value[`${area.id}Scale`] ?? 100) / 100;
-  const dx = Number(value[`${area.id}OffsetX`] ?? 0);
-  const dy = Number(value[`${area.id}OffsetY`] ?? 0);
   const size = Math.max(8, Math.round(72 * scale));
 
   // Wrapper div is required: <img> is a void element and cannot hold the resize handle.
@@ -636,7 +665,9 @@ function applyAll(value: SkinValue, editingId: string | null, commit: Commit, mo
   for (const area of AREAS) {
     if (area.id === "window") continue;
     if (area.kind === "sticker") applySticker(area, value, mode, editingId === area.id, commit);
-    else applyRegionImage(area.id, value, mode, true);
+    // On a theme switch (fade) only the regions whose image actually changed repaint; a
+    // settings edit still forces a repaint so fit/offset changes take effect.
+    else applyRegionImage(area.id, value, mode, !fade);
   }
 }
 
@@ -1279,6 +1310,7 @@ function disposeSkinDom(): void {
   document.getElementById(VIDEO_LAYER_ID)?.remove();
   document.getElementById(WALL_FADE_ID)?.remove();
   document.querySelectorAll<HTMLElement>("[data-dsh-skin-sticker]").forEach((el) => el.remove());
+  for (const id of Object.keys(stickerSignatures)) delete stickerSignatures[id];
   document.querySelectorAll<HTMLElement>("[data-dsh-skin-region]").forEach(clearRegionStyle);
   document.querySelectorAll<HTMLElement>("[data-dsh-skin-sticker-host]").forEach((el) => {
     el.style.removeProperty("position");
@@ -1320,16 +1352,16 @@ export function apply(ctx: ClientContext): void {
       let lastScheme = modeStore.get();
       const offTheme = ctx.on?.("theme/change", () => {
         const next = modeStore.get();
-        modeStore.notify();
+        const flipped = next !== lastScheme;
+        lastScheme = next;
         // Cross-fade only a real light <-> dark flip (not a font-size-only change), and
         // never the first snapshot, which is just the initial paint.
-        if (next !== lastScheme) {
-          lastScheme = next;
-          startThemeAnimation();
-          renderSkin(true);
-          return;
-        }
-        render();
+        if (flipped) startThemeAnimation();
+        // Let the palette repaint and the transition start in their own frame before the
+        // settings UI re-renders (its thumbnails decode the other mode's images).
+        requestAnimationFrame(() => modeStore.notify());
+        if (flipped) renderSkin(true);
+        else render();
       }) as (() => void) | undefined;
       // Repaint on structural churn (regions mounting/unmounting, re-renders) and on
       // theme flips. Attribute observation stays limited to the theme flag, so our own

@@ -25,13 +25,18 @@ hardens it for public use, with an offline test suite for the host half.
   DSH theme preference through `setTheme`, and follows `theme/change` when the theme is switched
   elsewhere.
 - **Smooth light/dark switch.** A theme flip used to snap in one frame. Now the plugin opens a short
-  transition window (`body[data-dsh-skin-theme-anim]`, 320 ms) in which colour-bearing properties —
-  background-color, color, border-color, outline-color, fill, stroke, box-shadow — transition across
-  the whole UI, so DSH's palette and the plugin's own tint cross-fade. When the wallpaper differs per
-  mode and both sides are still images, a temporary layer cross-fades the two, committing only once
-  the fade lands (image → video keeps the palette fade only: a video swap would need two live video
-  elements). The window is opened from the switch itself and from `theme/change`, and is skipped for
-  font-size-only changes and for the first snapshot.
+  transition window (`body[data-dsh-skin-theme-anim]`, 320 ms) in which `background-color`, `color` and
+  `border-color` transition, so DSH's palette and the plugin's own tint cross-fade. When the wallpaper
+  differs per mode and both sides are still images, a temporary layer cross-fades the two, committing
+  only once the fade lands (image → video keeps the palette fade only: a video swap would need two live
+  video elements). The window is opened from the switch itself and from `theme/change`, and is skipped
+  for font-size-only changes and for the first snapshot.
+- **Kept it cheap.** Those three properties are non-composited, so the scope adapts to the DOM: above
+  ~1500 elements the window switches to a `lite` scope that transitions only `body` and the big
+  surfaces instead of every descendant, and `prefers-reduced-motion` disables it. On the plugin's side,
+  regions repaint only when their image really changed, an unchanged sticker is no longer torn down and
+  re-decoded (which also stopped sticker videos from restarting on unrelated edits), and the settings
+  UI re-render is deferred one frame so it does not compete with the palette repaint.
 - **Video playback rate.** `videoPlaybackRate` drives `playbackRate` / `defaultPlaybackRate` on the
   window video and on sticker videos. Sticker areas now render a `<video>` for video URLs instead of
   an `<img>` that silently showed nothing.

@@ -122,6 +122,17 @@ temporary fixed layer holds the incoming artwork and fades in over the outgoing 
 repaint happens only after the fade lands, in that order, so nothing flashes. Image → video falls back
 to the palette fade, because swapping video sources in place would need two live `<video>` elements.
 
+That transition is expensive by construction — `background-color`, `color` and `border-color` are not
+compositor properties, so the browser recalculates style and repaints every frame the window is open.
+Three things keep it affordable: the property list is only what actually shifts between the palettes
+(`fill`/`stroke` are redundant because icons inherit `currentColor`, shadows barely differ, and
+pseudo-elements doubled the matched-element count); the scope adapts to the DOM — above ~1500 elements
+the attribute becomes `lite` and only `body` plus the big surfaces (`_sidebarCol`, `_centerCol`,
+`_pane`, `_panelBody`, `_composerSeat`, `_hero`) are transitioned, so a long conversation cannot drag
+the frame rate down; and `prefers-reduced-motion` switches the animation off entirely. The same frame
+is kept light on our side too: regions repaint only when their resolved image changed, an unchanged
+sticker is never torn down and re-decoded, and the settings UI's re-render is deferred one frame.
+
 ## Teardown contract
 
 Everything the plugin adds is registered on its own fiber and undone in `disposeSkinDom()`: window
