@@ -16,10 +16,19 @@ hardens it for public use, with an offline test suite for the host half.
   a file that was just uploaded but not committed to settings yet.
 - Streaming upload cap (`MAX_UPLOAD_BYTES`, 32 MB request body) answering `413` while the body is
   still arriving, plus a matching 24 MB pre-check and a visible error message in the settings page.
-- `test/host.test.mjs` — 32 assertions over the host routes (upload round-trip, byte fidelity, both
-  oversize paths, unsupported type, malformed payload, path traversal, GC keep/collect/fresh-file
-  semantics, `409` on unresolved settings, idempotent delete, route disposer). Runs offline: no DSH
-  process, no network.
+- **Per-mode artwork.** Every area gained `<area>ImageLight` / `<area>ImageDark` next to the shared
+  `<area>Image`; resolution is mode-specific first, shared as the fallback, so a config written before
+  this change keeps working. A sun/moon slider — registered in `sidebar.footer.action` (beside
+  Settings) and mirrored in the settings page — writes the real DSH theme preference through the
+  `theme` service, and follows `theme/change` when the theme is switched elsewhere.
+- **Video playback rate.** `videoPlaybackRate` drives `playbackRate` / `defaultPlaybackRate` on the
+  window video and on sticker videos. Sticker areas now render a `<video>` for video URLs instead of
+  an `<img>` that silently showed nothing.
+- `test/` suite — 48 assertions in two offline files: `host.test.mjs` (upload round-trip, byte
+  fidelity, both oversize paths, unsupported type, malformed payload, path traversal, GC keep /
+  collect / fresh-file / per-mode-only semantics, `409` on unresolved settings, idempotent delete,
+  route disposer) and `client-units.test.mjs` (per-mode image resolution, evaluated from the built
+  bundle with a stub React — no DOM, no browser). No DSH process, no network.
 - Explicit `kind: "prefix"` on the route registration, and the `register()` disposer is now returned
   to `ctx.effect`, so unloading the plugin actually removes the routes.
 

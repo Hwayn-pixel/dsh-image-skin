@@ -93,6 +93,19 @@ reveal the wallpaper, so binding the video's opacity to it faded the backdrop ou
 user wanted to see it. Sticker opacity does follow the slider, as an overlay that fades with the
 chrome it sits on.
 
+**Light / dark.** The scheme comes from the `theme` service (`getTheme().active.colorScheme`), not
+from the body flag: the flag is applied a tick after a switch, which would leave the panel tint one
+mode behind. `theme/change` is the continuous-sync signal, so images follow a switch made from DSH's
+own Appearance setting, and the sun/moon slider writes back through `setTheme` — the documented single
+preference-write entry — rather than styling around it. Every area resolves its image as
+`<area>Image<Mode>` → `<area>Image` → nothing, so the per-mode fields are purely additive and the
+shared field stays the lightweight default. `resolveAreaImage` is exported purely so the offline
+client test can pin that fallback order.
+
+**Video speed.** One `videoPlaybackRate` value is applied to every video the plugin renders — the
+window layer and sticker videos — on both `playbackRate` (live) and `defaultPlaybackRate` (survives a
+`src` swap). The slider previews it against the live elements before the debounced write lands.
+
 ## Teardown contract
 
 Everything the plugin adds is registered on its own fiber and undone in `disposeSkinDom()`: window

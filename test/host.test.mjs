@@ -95,6 +95,17 @@ const listFiles = () => readdirSync(join(home, "image-skin"));
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==";
 const dataUri = `data:image/png;base64,${PNG}`;
 
+console.log("== schema ==");
+{
+  const d = mod.ImageSkinSchema({});
+  check("defaults unchanged (enabled / panelOpacity)", d.enabled === true && d.panelOpacity === 85, JSON.stringify(d).slice(0, 80));
+  check(
+    "every area has shared + light + dark image fields",
+    mod.IMAGE_AREAS.every((a) => d[`${a}Image`] === "" && d[`${a}ImageLight`] === "" && d[`${a}ImageDark`] === ""),
+  );
+  check("videoPlaybackRate defaults to 1", d.videoPlaybackRate === 1, String(d.videoPlaybackRate));
+}
+
 console.log("== route registration ==");
 check("route registered", route !== null);
 check("kind is prefix", route?.kind === "prefix", `got ${route?.kind}`);
@@ -194,6 +205,17 @@ console.log("== delete ==");
   const r = await call("POST", "/dsh-image-skin/gc");
   check("gc with empty keep spares the newest file", json(r)?.removed?.length === 0, r.body);
   check("newest file still present", listFiles().length === 1, JSON.stringify(listFiles()));
+}
+{
+  // A file referenced only by a per-mode override must survive the sweep — the keep set
+  // is scanned generically, so new `${area}Image<Mode>` fields have to be covered too.
+  const urlPerMode = json(await call("POST", "/dsh-image-skin/upload", JSON.stringify({ image: dataUri })))?.url;
+  const namePerMode = urlPerMode.split("/").pop();
+  backdate(namePerMode);
+  fakeSettings.value = { enabled: true, centerImageDark: urlPerMode };
+  const report = json(await call("POST", "/dsh-image-skin/gc"));
+  check("gc keeps a per-mode-only file", existsSync(join(home, "image-skin", namePerMode)), JSON.stringify(report));
+  check("gc kept exactly that one reference", report?.kept === 1, JSON.stringify(report));
 }
 
 console.log("== disposer ==");

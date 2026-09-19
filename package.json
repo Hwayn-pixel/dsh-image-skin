@@ -66,7 +66,7 @@
   "scripts": {
     "build": "node build.mjs",
     "watch": "node build.mjs --watch",
-    "test": "node test/host.test.mjs",
+    "test": "node test/host.test.mjs && node test/client-units.test.mjs",
     "typecheck": "tsc --noEmit",
     "install-plugin": "node scripts/install.mjs",
     "prepublishOnly": "node build.mjs"

@@ -17,7 +17,14 @@ const IMG_ALPHA_VAR = "--dsh-skin-img-opacity";
 /** Keep in step with MAX_UPLOAD_BYTES (32 MB base64 envelope) in the host half. */
 const MAX_UPLOAD_MB = 24;
 
-export const inject = ["slots", "settingsScope"];
+export const inject = ["slots", "settingsScope", "theme"];
+
+type Mode = "light" | "dark";
+
+interface ThemeFace {
+  getTheme(): { active: { colorScheme: Mode } };
+  setTheme(id: string): void;
+}
 
 /** Live editor state shared between the React section and the non-React renderer. */
 let currentEditing: string | null = null;
@@ -36,11 +43,13 @@ interface Scope<T> {
 }
 interface ClientContext {
   effect(fn: () => (() => void) | void, label?: string): unknown;
+  on?(event: string, listener: () => void): unknown;
   settingsScope: { bind<T>(spec: { namespace: string }): Scope<T> };
   slots: {
     inject(slot: string, fn: () => unknown): unknown;
     register(options: Record<string, unknown>, component: unknown): unknown;
   };
+  theme?: ThemeFace;
   layout?: { selectPanel?: (id: string | null) => void };
 }
 
@@ -118,6 +127,54 @@ function fitProps(fit: string): { size: string; repeat: string } {
   return { size: "cover", repeat: "no-repeat" };
 }
 
+// ── light / dark aware resolution ───────────────────────────────────────────
+
+/**
+ * Current UI scheme. The theme service is authoritative (`theme/change` keeps us in
+ * sync when the user switches from DSH's own Appearance setting); the body flag is
+ * only a fallback for the moment before the service is readable.
+ */
+function readMode(theme?: ThemeFace): Mode {
+  try {
+    const scheme = theme?.getTheme().active.colorScheme;
+    if (scheme === "light" || scheme === "dark") return scheme;
+  } catch {
+    /* fall through to the DOM flag */
+  }
+  return document.body.hasAttribute("data-ds-dark-theme") ? "dark" : "light";
+}
+
+/**
+ * Resolve one area's image for a mode: the mode-specific override wins, otherwise the
+ * shared field, otherwise nothing. Exported so the offline suite can pin the fallback.
+ */
+export function resolveAreaImage(value: SkinValue | undefined, id: string, mode: Mode): string {
+  const v = value ?? {};
+  const specific = String(v[`${id}Image${mode === "dark" ? "Dark" : "Light"}`] ?? "");
+  return specific || String(v[`${id}Image`] ?? "");
+}
+
+/** The stored playback rate, clamped to the schema's range. */
+function videoRate(value: SkinValue): number {
+  const n = Number(value.videoPlaybackRate ?? 1);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(4, Math.max(0.1, n));
+}
+
+/** Live-apply a rate to whatever video is currently rendered (slider preview). */
+function previewVideoRate(rate: number): void {
+  const r = Math.min(4, Math.max(0.1, Number(rate) || 1));
+  const layer = document.getElementById(VIDEO_LAYER_ID) as HTMLVideoElement | null;
+  if (layer) {
+    layer.defaultPlaybackRate = r;
+    layer.playbackRate = r;
+  }
+  document.querySelectorAll<HTMLVideoElement>('[data-dsh-skin-sticker] video').forEach((v) => {
+    v.defaultPlaybackRate = r;
+    v.playbackRate = r;
+  });
+}
+
 // ── window (body + sidebar column) ──────────────────────────────────────────
 
 function applyWindowColumns(image: string): void {
@@ -170,9 +227,9 @@ function clearWindowImage(): void {
   body.style.removeProperty("background-position");
 }
 
-function applyWindow(value: SkinValue): void {
+function applyWindow(value: SkinValue, mode: Mode): void {
   const body = document.body;
-  const image = String(value.windowImage ?? "");
+  const image = resolveAreaImage(value, "window", mode);
   const on = value.windowEnabled !== false && value.enabled !== false && image.length > 0;
   const isVideo = on && VIDEO_RE.test(image);
   const existing = document.getElementById(VIDEO_LAYER_ID) as HTMLVideoElement | null;
@@ -184,6 +241,9 @@ function applyWindow(value: SkinValue): void {
       v.src = image;
       void v.play?.().catch(() => {});
     }
+    // Playback rate applies live, and defaultPlaybackRate keeps it across a src swap.
+    v.defaultPlaybackRate = videoRate(value);
+    v.playbackRate = videoRate(value);
     // The wallpaper is deliberately NOT dimmed by panelOpacity. That slider exists to
     // reveal the wallpaper, so binding the video to it faded the video out exactly when
     // the user wanted to see it — at 0 the panels AND the video were transparent, and
@@ -215,12 +275,13 @@ function applyWindow(value: SkinValue): void {
 
 // ── panel translucency + image alpha (shared slider) ────────────────────────
 
-function applyPanelOpacity(value: SkinValue): void {
+function applyPanelOpacity(value: SkinValue, mode: Mode): void {
   let style = document.getElementById(PANEL_STYLE_ID) as HTMLStyleElement | null;
   const opacity = Number(value.panelOpacity ?? 100);
   const a = Math.max(0, Math.min(1, opacity / 100));
-  const dark = document.body.hasAttribute("data-ds-dark-theme");
-  const rgb = dark ? "18, 31, 47" : "255, 255, 252";
+  // Take the scheme from the theme service rather than the body flag: on a theme switch
+  // the flag is applied a tick later, which would leave the panel tint one mode behind.
+  const rgb = mode === "dark" ? "18, 31, 47" : "255, 255, 252";
   const l = (extra: number) => Math.min(1, a + extra).toFixed(3);
   if (!style) {
     style = document.createElement("style");
@@ -272,8 +333,8 @@ function regionApplied(id: string, image: string): boolean {
   return surface.style.getPropertyValue("background-image").includes(image);
 }
 
-function applyRegionImage(id: string, value: SkinValue, force = false): void {
-  const image = String(value[`${id}Image`] ?? "");
+function applyRegionImage(id: string, value: SkinValue, mode: Mode, force = false): void {
+  const image = resolveAreaImage(value, id, mode);
   const on = value.enabled !== false && value[`${id}Enabled`] !== false && image.length > 0;
   if (!force && on && regionApplied(id, image)) return; // already painted on the live surface
   document.querySelectorAll<HTMLElement>(`[data-dsh-skin-region="${id}"]`).forEach(clearRegionStyle);
@@ -349,9 +410,9 @@ function attachDrag(
   el.addEventListener("pointercancel", finish);
 }
 
-function applySticker(area: AreaDef, value: SkinValue, editing: boolean, commit: Commit): void {
+function applySticker(area: AreaDef, value: SkinValue, mode: Mode, editing: boolean, commit: Commit): void {
   document.querySelectorAll<HTMLElement>(`[data-dsh-skin-sticker="${area.id}"]`).forEach((el) => el.remove());
-  const image = String(value[`${area.id}Image`] ?? "");
+  const image = resolveAreaImage(value, area.id, mode);
   const on = value.enabled !== false && value[`${area.id}Enabled`] !== false && image.length > 0;
   if (!on || !area.sel) return;
   const target = document.querySelector<HTMLElement>(area.sel);
@@ -379,13 +440,35 @@ function applySticker(area: AreaDef, value: SkinValue, editing: boolean, commit:
     editing ? "pointer-events:auto;cursor:move;outline:2px dashed #5aa7d8;outline-offset:2px" : "pointer-events:none",
   ].join(";");
 
-  const img = document.createElement("img");
-  img.src = image;
-  img.alt = "";
-  img.draggable = false;
-  img.setAttribute("aria-hidden", "true");
-  img.style.cssText = "width:100%;height:100%;object-fit:contain;display:block;pointer-events:none";
-  box.append(img);
+  // The upload picker accepts video for every area, so a sticker has to be able to play
+  // one too — an <img> pointed at an mp4 renders nothing at all.
+  const mediaStyle = "width:100%;height:100%;object-fit:contain;display:block;pointer-events:none";
+  let media: HTMLElement;
+  if (VIDEO_RE.test(image)) {
+    const video = document.createElement("video");
+    video.src = image;
+    video.muted = true;
+    video.loop = true;
+    video.autoplay = true;
+    video.playsInline = true;
+    video.setAttribute("playsinline", "");
+    video.setAttribute("muted", "");
+    video.setAttribute("aria-hidden", "true");
+    video.style.cssText = mediaStyle;
+    video.defaultPlaybackRate = videoRate(value);
+    video.playbackRate = videoRate(value);
+    void video.play?.().catch(() => {});
+    media = video;
+  } else {
+    const img = document.createElement("img");
+    img.src = image;
+    img.alt = "";
+    img.draggable = false;
+    img.setAttribute("aria-hidden", "true");
+    img.style.cssText = mediaStyle;
+    media = img;
+  }
+  box.append(media);
   target.append(box);
   if (!editing) return;
 
@@ -464,13 +547,13 @@ function ensureFinishButton(): void {
 
 // ── apply all ───────────────────────────────────────────────────────────────
 
-function applyAll(value: SkinValue, editingId: string | null, commit: Commit): void {
-  applyWindow(value);
-  applyPanelOpacity(value);
+function applyAll(value: SkinValue, editingId: string | null, commit: Commit, mode: Mode): void {
+  applyWindow(value, mode);
+  applyPanelOpacity(value, mode);
   for (const area of AREAS) {
     if (area.id === "window") continue;
-    if (area.kind === "sticker") applySticker(area, value, editingId === area.id, commit);
-    else applyRegionImage(area.id, value, true);
+    if (area.kind === "sticker") applySticker(area, value, mode, editingId === area.id, commit);
+    else applyRegionImage(area.id, value, mode, true);
   }
 }
 
@@ -483,12 +566,14 @@ function applyAll(value: SkinValue, editingId: string | null, commit: Commit): v
 const REFRESH_DELAY_MS = 300;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let readSkinValue: (() => SkinValue | undefined) | null = null;
+let readSkinMode: (() => Mode) | null = null;
 
 /** Repaint the window columns and every region whose live surface lost its image. */
 function refreshRegions(): void {
   const value = readSkinValue?.();
   if (!value) return;
-  const windowImage = String(value.windowImage ?? "");
+  const mode = readSkinMode ? readSkinMode() : readMode();
+  const windowImage = resolveAreaImage(value, "window", mode);
   const columnsOn = value.enabled !== false && value.windowEnabled !== false && windowImage.length > 0 && !VIDEO_RE.test(windowImage);
   if (columnsOn) {
     const columns = Array.from(document.querySelectorAll<HTMLElement>('[class*="_sidebarCol"]'));
@@ -496,7 +581,7 @@ function refreshRegions(): void {
   }
   for (const area of AREAS) {
     if (area.kind === "sticker" || area.id === "window") continue;
-    applyRegionImage(area.id, value, false);
+    applyRegionImage(area.id, value, mode, false);
   }
 }
 
@@ -510,8 +595,132 @@ function scheduleRegionRefresh(): void {
 
 // ── settings UI ─────────────────────────────────────────────────────────────
 
-function PanelOpacityRow(props: {
+// ── small controls ──────────────────────────────────────────────────────────
+
+/** Subscribable view of the current scheme, so React consumers follow theme changes. */
+interface ModeStore {
+  get(): Mode;
+  pick(mode: Mode): void;
+  subscribe(cb: () => void): () => void;
+  notify(): void;
+}
+
+function makeModeStore(theme?: ThemeFace): ModeStore {
+  let listeners: Array<() => void> = [];
+  return {
+    get: () => readMode(theme),
+    pick(mode: Mode) {
+      try {
+        theme?.setTheme(mode);
+      } catch (error) {
+        console.error("[dsh-image-skin] could not switch the theme", error);
+      }
+    },
+    subscribe(cb: () => void) {
+      listeners.push(cb);
+      return () => {
+        listeners = listeners.filter((l) => l !== cb);
+      };
+    },
+    notify() {
+      for (const l of listeners) l();
+    },
+  };
+}
+
+/** Compact sun/moon slider. It drives the real DSH theme preference. */
+function ModeSlider(props: { mode: Mode; onPick: (m: Mode) => void; compact?: boolean }): React.ReactElement {
+  const h = React.createElement;
+  const maskId = React.useMemo(() => `dsh-skin-moon-${Math.random().toString(36).slice(2, 8)}`, []);
+  const sun = h(
+    "svg",
+    { key: "sun", width: 15, height: 15, viewBox: "0 0 24 24", "aria-hidden": "true" },
+    h("circle", { cx: 12, cy: 12, r: 4.6, fill: "currentColor" }),
+    ...[0, 45, 90, 135, 180, 225, 270, 315].map((deg) => {
+      const rad = (deg * Math.PI) / 180;
+      return h("line", {
+        key: deg,
+        x1: 12 + Math.cos(rad) * 7.3,
+        y1: 12 + Math.sin(rad) * 7.3,
+        x2: 12 + Math.cos(rad) * 10.2,
+        y2: 12 + Math.sin(rad) * 10.2,
+        stroke: "currentColor",
+        strokeWidth: 2,
+        strokeLinecap: "round",
+      });
+    }),
+  );
+  const moon = h(
+    "svg",
+    { key: "moon", width: 15, height: 15, viewBox: "0 0 24 24", "aria-hidden": "true" },
+    h(
+      "mask",
+      { id: maskId, key: "mask" },
+      h("rect", { x: 0, y: 0, width: 24, height: 24, fill: "#fff" }),
+      h("circle", { cx: 16.5, cy: 8.5, r: 7.7, fill: "#000" }),
+    ),
+    h("circle", { cx: 12, cy: 12, r: 8.3, fill: "currentColor", mask: `url(#${maskId})` }),
+  );
+  const side = (m: Mode, icon: React.ReactElement, text: string) =>
+    h(
+      "button",
+      {
+        key: m,
+        type: "button",
+        title: text,
+        "aria-label": text,
+        "aria-pressed": props.mode === m,
+        onClick: (e: any) => {
+          e.stopPropagation();
+          props.onPick(m);
+        },
+        style: {
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: props.compact ? 22 : 26,
+          height: props.compact ? 18 : 22,
+          padding: 0,
+          border: "none",
+          borderRadius: 999,
+          cursor: "pointer",
+          background: props.mode === m ? "var(--dsw-alias-brand-primary,#5aa7d8)" : "transparent",
+          color: props.mode === m ? "#fff" : "var(--dsw-alias-label-secondary,currentColor)",
+          transition: "background 160ms ease, color 160ms ease",
+        },
+      },
+      icon,
+    );
+  return h(
+    "div",
+    {
+      role: "group",
+      "aria-label": "浅色 / 深色模式",
+      title: props.mode === "dark" ? "当前：深色模式" : "当前：浅色模式",
+      style: {
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 2,
+        padding: 2,
+        borderRadius: 999,
+        border: "1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3))",
+        background: "var(--dsw-alias-bg-layer-2,rgba(128,128,128,.10))",
+      },
+    },
+    side("light", sun, "浅色模式"),
+    side("dark", moon, "深色模式"),
+  );
+}
+
+/** Slider row with a debounced commit — used for panel opacity and video rate. */
+function SliderRow(props: {
+  title: string;
+  hint: string;
   value: number;
+  min: number;
+  max: number;
+  step: number;
+  format: (n: number) => string;
   onPreview: (n: number) => void;
   onCommit: (n: number) => void;
 }): React.ReactElement {
@@ -545,18 +754,124 @@ function PanelOpacityRow(props: {
       h(
         "div",
         null,
-        h("span", { className: "dshImgSkin-title" }, "面板不透明度"),
-        h("small", { className: "dshImgSkin-hint" }, "越低越能透出壁纸；角标贴图会同步变淡，壁纸本身不受影响"),
+        h("span", { className: "dshImgSkin-title" }, props.title),
+        h("small", { className: "dshImgSkin-hint" }, props.hint),
       ),
-      h("span", null, String(draft) + "%"),
+      h("span", null, props.format(draft)),
     ),
     h("input", {
       type: "range",
-      min: 0,
-      max: 100,
+      min: props.min,
+      max: props.max,
+      step: props.step,
       value: draft,
       onChange: (e: any) => handle(Number(e.target.value)),
     }),
+  );
+}
+
+/** One area row: mode-aware thumbnail, upload target, clear, fit, sticker editor. */
+function AreaRow(props: {
+  area: AreaDef;
+  value: SkinValue;
+  mode: Mode;
+  busyField: string | null;
+  editing: boolean;
+  onPick: (file: File, field: string) => void;
+  onSet: (field: string, v: unknown) => void;
+  onClear: (field: string) => void;
+  onToggleEdit: (id: string) => void;
+}): React.ReactElement {
+  const h = React.createElement;
+  const [sharedTarget, setSharedTarget] = React.useState(false);
+  const area = props.area;
+  const v = props.value;
+  const modeWord = props.mode === "dark" ? "深色" : "浅色";
+  const specificField = `${area.id}Image${props.mode === "dark" ? "Dark" : "Light"}`;
+  const sharedField = `${area.id}Image`;
+  const specific = String(v[specificField] ?? "");
+  const sharedImage = String(v[sharedField] ?? "");
+  const effective = resolveAreaImage(v, area.id, props.mode);
+  const source = specific ? `${modeWord}专用` : sharedImage ? "共用" : "未设置";
+  const enabled = v[`${area.id}Enabled`] !== false;
+  const fit = String(v[`${area.id}Fit`] ?? "cover");
+  const isVideo = effective.length > 0 && VIDEO_RE.test(effective);
+  const targetField = sharedTarget ? sharedField : specificField;
+  const button = (key: string, label: string, onClick: () => void, active = false) =>
+    h("button", { key, type: "button", className: "dshImgSkin-btn", "data-active": String(active), onClick }, label);
+  return h(
+    "div",
+    { className: "dshImgSkin-row", key: area.id },
+    h(
+      "div",
+      { className: "dshImgSkin-head" },
+      h(
+        "div",
+        null,
+        h("span", { className: "dshImgSkin-title" }, area.label),
+        h("small", { className: "dshImgSkin-hint" }, `${area.hint} · 生效来源：${source}`),
+      ),
+      h(
+        "label",
+        { className: "dshImgSkin-actions" },
+        h("input", {
+          type: "checkbox",
+          checked: enabled,
+          onChange: (e: any) => props.onSet(`${area.id}Enabled`, e.target.checked),
+        }),
+        "启用",
+      ),
+    ),
+    effective
+      ? isVideo
+        ? h("video", { className: "dshImgSkin-thumb", src: effective, muted: true, loop: true, autoPlay: true, playsInline: true })
+        : h("img", { className: "dshImgSkin-thumb", src: effective, alt: "" })
+      : null,
+    h(
+      "div",
+      { className: "dshImgSkin-actions" },
+      h(
+        "span",
+        { className: "dshImgSkin-actions", title: "上传写入哪个字段" },
+        button("mode-target", `${modeWord}专用`, () => setSharedTarget(false), !sharedTarget),
+        button("shared-target", "共用", () => setSharedTarget(true), sharedTarget),
+      ),
+      h(
+        "label",
+        { className: "dshImgSkin-btn" },
+        props.busyField === targetField ? "上传中…" : "上传图片/视频(GIF)",
+        h("input", {
+          type: "file",
+          accept: "image/*,video/*",
+          style: { display: "none" },
+          onChange: (e: any) => {
+            const file = e.target.files?.[0];
+            if (file) props.onPick(file, targetField);
+            e.target.value = "";
+          },
+        }),
+      ),
+      specific ? button("clear-mode", "清除本模式", () => props.onClear(specificField)) : null,
+      sharedImage && !sharedTarget ? button("clear-shared", "清除共用图", () => props.onClear(sharedField)) : null,
+      area.kind === "region"
+        ? h(
+            "select",
+            {
+              key: "fit",
+              className: "dshImgSkin-btn",
+              value: fit,
+              onChange: (e: any) => props.onSet(`${area.id}Fit`, e.target.value),
+            },
+            h("option", { value: "cover" }, "铺满"),
+            h("option", { value: "contain" }, "适应"),
+            h("option", { value: "tile" }, "平铺"),
+          )
+        : null,
+      area.kind === "sticker" && effective
+        ? button("edit-pos", props.editing ? "完成" : "编辑位置", () => props.onToggleEdit(area.id), props.editing)
+        : null,
+    ),
+    props.editing ? h("small", { className: "dshImgSkin-hint" }, "拖动图片移动位置，拖右下角圆点缩放。") : null,
   );
 }
 
@@ -594,26 +909,27 @@ function formatMb(bytes: number): string {
   return (bytes / 1024 / 1024).toFixed(1);
 }
 
-function createSection(scope: Scope<SkinValue>): () => React.ReactElement {
+function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => React.ReactElement {
   const h = React.createElement;
   return function ImageSkinSection(): React.ReactElement {
     const value = React.useSyncExternalStore(
       (cb) => scope.subscribe(cb),
       () => scope.getSnapshot().value,
     ) as SkinValue | undefined;
+    const mode = React.useSyncExternalStore(modeStore.subscribe, modeStore.get);
     const v: SkinValue = value ?? {};
     const [busy, setBusy] = React.useState<string | null>(null);
     const [editingId, setEditingId] = React.useState<string | null>(currentEditing);
     const [notice, setNotice] = React.useState<string | null>(null);
     const [gcStatus, setGcStatus] = React.useState<string | null>(null);
 
-    const upload = async (area: string, file: File) => {
+    const upload = async (field: string, file: File) => {
       setNotice(null);
       if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
         setNotice(`${file.name} 有 ${formatMb(file.size)} MB，超过 ${MAX_UPLOAD_MB} MB 上限`);
         return;
       }
-      setBusy(area);
+      setBusy(field);
       try {
         const dataUri = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -631,7 +947,7 @@ function createSection(scope: Scope<SkinValue>): () => React.ReactElement {
           setNotice(data?.error ?? `上传失败（HTTP ${resp.status}）`);
           return;
         }
-        await scope.set(`${area}Image`, data.url);
+        await scope.set(field, data.url);
         scheduleCollectUnused();
       } catch (error) {
         setNotice(error instanceof Error ? error.message : String(error));
@@ -649,10 +965,46 @@ function createSection(scope: Scope<SkinValue>): () => React.ReactElement {
         { className: "dshImgSkin-hint" },
         "给每个区域/角标上传图片。图片只存在本机（$DSH_HOME/image-skin），不会上传到外部服务。角标可点「编辑位置」后拖动/缩放。",
       ),
-      h(PanelOpacityRow, {
+      h(
+        "div",
+        { className: "dshImgSkin-row" },
+        h(
+          "div",
+          { className: "dshImgSkin-head" },
+          h(
+            "div",
+            null,
+            h("span", { className: "dshImgSkin-title" }, "浅色 / 深色模式"),
+            h(
+              "small",
+              { className: "dshImgSkin-hint" },
+              `当前是${mode === "dark" ? "深色" : "浅色"}模式：上传默认只作用于这个模式；每个区域都能再存一份「共用」图给两个模式用。这个滑块切的是 DSH 主题本身，所以外部切换它也会跟着变。`,
+            ),
+          ),
+          h(ModeSlider, { mode, onPick: (m: Mode) => modeStore.pick(m) }),
+        ),
+      ),
+      h(SliderRow, {
+        title: "面板不透明度",
+        hint: "越低越能透出壁纸；角标贴图会同步变淡，壁纸本身不受影响",
         value: Number(v.panelOpacity ?? 100),
-        onPreview: (n: number) => applyPanelOpacity({ ...v, panelOpacity: n }),
+        min: 0,
+        max: 100,
+        step: 1,
+        format: (n: number) => `${n}%`,
+        onPreview: (n: number) => applyPanelOpacity({ ...v, panelOpacity: n }, mode),
         onCommit: (n: number) => void scope.set("panelOpacity", n),
+      }),
+      h(SliderRow, {
+        title: "视频播放速率",
+        hint: "作用于上传的视频（窗口壁纸与角标视频），拖动即时生效",
+        value: Number(v.videoPlaybackRate ?? 1),
+        min: 0.25,
+        max: 3,
+        step: 0.25,
+        format: (n: number) => `${n}×`,
+        onPreview: (n: number) => previewVideoRate(n),
+        onCommit: (n: number) => void scope.set("videoPlaybackRate", n),
       }),
       notice ? h("p", { className: "dshImgSkin-hint", style: { color: "#d9534f" } }, notice) : null,
       h(
@@ -695,109 +1047,29 @@ function createSection(scope: Scope<SkinValue>): () => React.ReactElement {
         ),
         gcStatus ? h("small", { className: "dshImgSkin-hint" }, gcStatus) : null,
       ),
-      ...AREAS.map((area) => {
-        const image = String(v[`${area.id}Image`] ?? "");
-        const enabled = v[`${area.id}Enabled`] !== false;
-        const fit = String(v[`${area.id}Fit`] ?? "cover");
-        const editing = editingId === area.id;
-        const commit: Commit = (patch) => {
-          for (const [k, val] of Object.entries(patch)) void scope.set(k, val);
-        };
-        return h(
-          "div",
-          { className: "dshImgSkin-row", key: area.id },
-          h(
-            "div",
-            { className: "dshImgSkin-head" },
-            h(
-              "div",
-              null,
-              h("span", { className: "dshImgSkin-title" }, area.label),
-              h("small", { className: "dshImgSkin-hint" }, area.hint),
-            ),
-            h(
-              "label",
-              { className: "dshImgSkin-actions" },
-              h("input", {
-                type: "checkbox",
-                checked: enabled,
-                onChange: (e: any) => void scope.set(`${area.id}Enabled`, e.target.checked),
-              }),
-              "启用",
-            ),
-          ),
-          image ? h("img", { className: "dshImgSkin-thumb", src: image, alt: "" }) : null,
-          h(
-            "div",
-            { className: "dshImgSkin-actions" },
-            h(
-              "label",
-              { className: "dshImgSkin-btn" },
-              busy === area.id ? "上传中…" : "上传图片/视频(GIF)",
-              h("input", {
-                type: "file",
-                accept: "image/*,video/*",
-                style: { display: "none" },
-                onChange: (e: any) => {
-                  const file = e.target.files?.[0];
-                  if (file) void upload(area.id, file);
-                  e.target.value = "";
-                },
-              }),
-            ),
-            image
-              ? h(
-                  "button",
-                  {
-                    className: "dshImgSkin-btn",
-                    onClick: () => {
-                      void (async () => {
-                        await scope.set(`${area.id}Image`, "");
-                        scheduleCollectUnused();
-                      })();
-                    },
-                  },
-                  "清除",
-                )
-              : null,
-            area.kind === "region"
-              ? h(
-                  "select",
-                  {
-                    className: "dshImgSkin-btn",
-                    value: fit,
-                    onChange: (e: any) => void scope.set(`${area.id}Fit`, e.target.value),
-                  },
-                  h("option", { value: "cover" }, "铺满"),
-                  h("option", { value: "contain" }, "适应"),
-                  h("option", { value: "tile" }, "平铺"),
-                )
-              : null,
-            area.kind === "sticker" && image
-              ? h(
-                  "button",
-                  {
-                    className: "dshImgSkin-btn",
-                    "data-active": String(editing),
-                    onClick: () => {
-                      const next = editing ? null : area.id;
-                      setEditingId(next);
-                      setEditing(next);
-                    },
-                  },
-                  editing ? "完成" : "编辑位置",
-                )
-              : null,
-          ),
-          editing
-            ? h(
-                "small",
-                { className: "dshImgSkin-hint" },
-                "拖动图片移动位置，拖右下角圆点缩放。",
-              )
-            : null,
-        );
-      }),
+      ...AREAS.map((area) =>
+        h(AreaRow, {
+          key: area.id,
+          area,
+          value: v,
+          mode,
+          busyField: busy,
+          editing: editingId === area.id,
+          onPick: (file: File, field: string) => void upload(field, file),
+          onSet: (field: string, val: unknown) => void scope.set(field, val),
+          onClear: (field: string) => {
+            void (async () => {
+              await scope.set(field, "");
+              scheduleCollectUnused();
+            })();
+          },
+          onToggleEdit: (id: string) => {
+            const next = editingId === id ? null : id;
+            setEditingId(next);
+            setEditing(next);
+          },
+        }),
+      ),
     );
   };
 }
@@ -835,7 +1107,8 @@ export function apply(ctx: ClientContext): void {
   ensureBaseStyles();
   document.body.setAttribute(BODY_ATTR, "");
   const scope = ctx.settingsScope.bind<SkinValue>({ namespace: NS });
-  const section = createSection(scope);
+  const modeStore = makeModeStore(ctx.theme);
+  const section = createSection(scope, modeStore);
 
   const commit: Commit = (patch) => {
     for (const [k, val] of Object.entries(patch)) void scope.set(k, val);
@@ -843,14 +1116,21 @@ export function apply(ctx: ClientContext): void {
 
   const render = () => {
     const snapshot = scope.getSnapshot();
-    if (snapshot.value) applyAll(snapshot.value, currentEditing, commit);
+    if (snapshot.value) applyAll(snapshot.value, currentEditing, commit, modeStore.get());
   };
   reapply = render;
   readSkinValue = () => scope.getSnapshot().value;
+  readSkinMode = () => modeStore.get();
   ctx.effect(
     () => {
       const unsubscribe = scope.subscribe(render);
       render();
+      // `theme/change` is the sanctioned continuous-sync signal: when the user flips the
+      // theme from DSH's own Appearance setting, our per-mode images have to follow.
+      const offTheme = ctx.on?.("theme/change", () => {
+        modeStore.notify();
+        render();
+      }) as (() => void) | undefined;
       // Repaint on structural churn (regions mounting/unmounting, re-renders) and on
       // theme flips. Attribute observation stays limited to the theme flag, so our own
       // inline styles and data-* tags can never re-trigger the observer.
@@ -863,6 +1143,7 @@ export function apply(ctx: ClientContext): void {
       });
       return () => {
         unsubscribe();
+        if (typeof offTheme === "function") offTheme();
         observer.disconnect();
         if (refreshTimer) {
           clearTimeout(refreshTimer);
@@ -873,6 +1154,7 @@ export function apply(ctx: ClientContext): void {
           gcTimer = null;
         }
         readSkinValue = null;
+        readSkinMode = null;
         reapply = null;
         disposeSkinDom();
         document.body.removeAttribute(BODY_ATTR);
@@ -891,6 +1173,27 @@ export function apply(ctx: ClientContext): void {
         inject: () => ({}),
       },
       section,
+    ),
+  );
+
+  // Small sun/moon slider beside Settings at the sidebar foot (`sidebar.footer.action`).
+  function ModeAction(): React.ReactElement {
+    const mode = React.useSyncExternalStore(modeStore.subscribe, modeStore.get);
+    return React.createElement(ModeSlider, {
+      mode,
+      onPick: (m: Mode) => modeStore.pick(m),
+      compact: true,
+    });
+  }
+  ctx.slots.inject("sidebar.footer.action", () =>
+    ctx.slots.register(
+      {
+        name: "sidebar.footer.action",
+        id: "image-skin-mode",
+        order: 30,
+        label: () => "图片皮肤：浅色/深色",
+      },
+      ModeAction,
     ),
   );
 }

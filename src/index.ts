@@ -36,13 +36,19 @@ function settingsNamespace(value: string): string {
   return value;
 }
 
-// Data-driven schema: a couple of globals plus four fields per area.
+// Data-driven schema: a couple of globals plus a handful of fields per area.
+// Every area carries a *shared* image plus two optional per-mode overrides
+// (light / dark). Resolution order is `<area>Image<Mode>` then `<area>Image`, so a
+// stored config written before per-mode support existed keeps working unchanged.
 const shape: Record<string, unknown> = {
   enabled: z.boolean().default(true).description("总开关：关闭后所有图片皮肤失效"),
   panelOpacity: z.number().min(0).max(100).default(85).role("slider").description("UI 面板不透明度（越低越能透出背景图）"),
+  videoPlaybackRate: z.number().min(0.1).max(4).default(1).role("slider").description("视频播放速率（作用于所有上传的视频：窗口壁纸与角标）"),
 };
 for (const area of IMAGE_AREAS) {
-  shape[`${area}Image`] = z.string().default("").description(`${area} 区域图片 URL`);
+  shape[`${area}Image`] = z.string().default("").description(`${area} 共用图片 URL（浅色/深色都用，可被专用图覆盖）`);
+  shape[`${area}ImageLight`] = z.string().default("").description(`${area} 浅色模式专用图片 URL（留空则回退共用图）`);
+  shape[`${area}ImageDark`] = z.string().default("").description(`${area} 深色模式专用图片 URL（留空则回退共用图）`);
   shape[`${area}Enabled`] = z.boolean().default(true).description(`${area} 区域启用`);
   shape[`${area}Fit`] = z
     .union([z.const("cover"), z.const("contain"), z.const("tile")])
