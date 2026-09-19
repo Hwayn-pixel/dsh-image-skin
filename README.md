@@ -6,6 +6,16 @@ sidebar and the composer. Everything is configured from a settings submenu and s
 
 > 中文说明见下方 [中文](#中文说明)。
 
+## About / 关于
+
+This is **a student's first open-source project** (2026). It was made for fun and to learn, and it is
+a **low-maintenance** project: issues and PRs are welcome, but replies may be slow, and there is no
+roadmap, release cadence or support commitment. Use it, fork it, learn from it — just don't expect a
+product.
+
+这是**一名学生的第一次开源尝试**（2026）。出于兴趣与学习而做，属于**弱维护**项目：欢迎提 issue / PR，
+但回复可能较慢，也没有路线图、发版节奏或支持承诺。欢迎使用、fork、学习——只是别把它当产品。
+
 ## Features
 
 - **Per-region artwork** — window backdrop (static image, GIF, or `mp4`/`webm` video), center column,
@@ -103,6 +113,11 @@ published artifact can never drift from `src/`.
 1. add an id to `IMAGE_AREAS` in `src/index.ts` — the settings schema is generated from it;
 2. add the same id and a label to `AREAS` in `src/client/index.ts`;
 3. add a `REGION_SELECTORS` entry, and clean it up in `disposeSkinDom()` if it adds DOM.
+
+## Authors / 作者
+
+- **Hwayn**（幻弈）— *author* / 作者：设计、实现与主要代码。
+- **Yucheng Xiao**（肖宇成）— *contributor* / 协作者：方向、需求、测试，以及让这个项目得以公开。
 
 ## License
 

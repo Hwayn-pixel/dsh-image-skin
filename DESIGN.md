@@ -1,5 +1,33 @@
 # dsh-image-skin — design notes
 
+> 下方先给中文摘要，正文为详细英文设计笔记。
+> Chinese summary first; the body is the detailed English design notes.
+
+## 中文摘要
+
+给 DSH（DeepSeek Harness）Web UI 做一层**粗粒度皮肤**：把界面上少数几个大区域换成用户自己的图（含循环视频），
+角标可拖动 / 缩放，全部在设置二级菜单里配置，且**不改 DSH 源码、可一键还原**。
+
+- **组成**：`package.json` 声明 `dsh.bundle.patch` 与 `dsh.client.platform`；`cordis.patch.yml` 插入 `ui-image-skin` 行；
+  宿主半（`src/index.ts`）注册设置命名空间与 `/dsh-image-skin/*` 路由；浏览器半（`src/client/index.ts`）绑定设置、绘制区域、
+  注册 `settings.section` 设置页。`lib/` 是 DSH 实际加载的产物，所以入库提交。
+- **设置**：`IMAGE_AREAS` 是唯一真源，schemastery 结构由它生成（每个区域 6 个字段 + 全局 `enabled` / `panelOpacity`），
+  因此新增区域无需改 schema。只持久化 URL，不存图片本体；文件落在 `$DSH_HOME/image-skin/`。
+- **上传**：`POST /upload` 收 data URI，流式上限 32 MB（超出时 body 未读完即回 `413`），类型白名单决定扩展名，
+  文件名用 UUID，客户端提供的文件名永远落不到磁盘。
+- **回收**：`POST /gc` 删除已无引用的文件；**保留集在宿主侧**由设置解析得出（客户端无法要求删别人的文件）；
+  60 秒内的新文件不回收；设置尚不可解析时返回 `409`。
+- **绘制**：区域以 CSS Modules **类名后缀**定位（`_centerCol`、`_sidebarCol`、`_hero`、`_pane`、`_composerSeat`…），
+  打 `data-dsh-skin-region` 标记实现幂等；`MutationObserver` 做 300 ms 节流修复，**只修区域、不动角标**；
+  角标用 `<div>` 包裹（`<img>` 是空元素，带不了缩放手柄）；面板不透明度写一个作用于
+  `body[data-dsh-image-skin]` 的 `<style>` 覆盖主题 token，**壁纸本身不跟随该滑块**。
+- **明暗**：以 `theme` 服务的 `colorScheme` 为准；`theme/change` 持续同步；切换时开一个 320 ms 过渡窗口交叉淡化调色板，
+  壁纸（两边都是静态图时）做真正的交叉淡化（图→视频只走调色板）；另一模式的素材用 `Image.decode()` / 隐藏 `<video>` 预热。
+- **已知限制**：区域宿主是 DSH 内部实现，改名即失效；文件路由不支持 `Range`；上传走 base64（体积膨胀 ~33%）。
+- **作者**：**Hwayn**（幻弈）—— 设计与实现；**Yucheng Xiao**（肖宇成）—— 协作者（方向、需求、测试与发布）。
+
+（详细英文设计见下。 / Detailed English design notes below.）
+
 ## Goal
 
 Give the DSH web UI a **coarse** skin: replace the few large regions of the interface with the user's
