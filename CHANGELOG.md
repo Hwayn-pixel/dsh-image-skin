@@ -37,6 +37,14 @@ hardens it for public use, with an offline test suite for the host half.
   regions repaint only when their image really changed, an unchanged sticker is no longer torn down and
   re-decoded (which also stopped sticker videos from restarting on unrelated edits), and the settings
   UI re-render is deferred one frame so it does not compete with the palette repaint.
+- **No more stall on the image itself.** Switching modes used to fetch *and* decode the incoming
+  artwork at that exact moment. Two changes remove it: stored files are now served
+  `cache-control: public, max-age=31536000, immutable` (a stored file is addressed by a UUID minted
+  per upload, so it can never change under its URL — previously `no-cache` made the browser re-fetch
+  a multi-MB wallpaper on every switch), and the browser half warms the *other* mode's artwork —
+  `Image.decode()` for images, a hidden `preload="auto"` element for videos — shortly after the
+  current mode settles, so the switch has nothing left to pay for. Warming is keyed by URL (each
+  artwork once) and skips areas whose image the two modes share.
 - **Video playback rate.** `videoPlaybackRate` drives `playbackRate` / `defaultPlaybackRate` on the
   window video and on sticker videos. Sticker areas now render a `<video>` for video URLs instead of
   an `<img>` that silently showed nothing.

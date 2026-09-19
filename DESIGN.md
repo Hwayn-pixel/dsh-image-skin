@@ -133,6 +133,16 @@ the frame rate down; and `prefers-reduced-motion` switches the animation off ent
 is kept light on our side too: regions repaint only when their resolved image changed, an unchanged
 sticker is never torn down and re-decoded, and the settings UI's re-render is deferred one frame.
 
+**Loading the artwork ahead of the switch.** The remaining stall was not the animation but the artwork
+itself: a mode switch swaps the wallpaper and every per-mode region image, so the browser fetched and
+decoded them at that instant. Two changes remove it. Stored files are served
+`cache-control: public, max-age=31536000, immutable` — a file is addressed by a UUID minted per upload,
+so its bytes can never change under that URL, and the previous `no-cache` forced a full re-fetch of a
+multi-MB wallpaper on every switch. And the browser half *warms* the mode that is not on screen: about
+250 ms after the current mode settles it pulls the other mode's artwork through `Image.decode()` (or a
+hidden `preload="auto"` element for a video), so nothing is left to decode at switch time. Warming is
+keyed by URL — each artwork once — and areas whose image both modes share are skipped.
+
 ## Teardown contract
 
 Everything the plugin adds is registered on its own fiber and undone in `disposeSkinDom()`: window

@@ -205,6 +205,66 @@ function previewVideoRate(rate: number): void {
   });
 }
 
+// ── warming the mode that is not on screen ──────────────────────────────────
+
+/** URLs already warmed (the same artwork is warmed once), and the hidden video preloaders. */
+const warmedUrls = new Set<string>();
+const warmLoaders: HTMLVideoElement[] = [];
+let warmTimer: ReturnType<typeof setTimeout> | null = null;
+
+function warmImage(url: string): void {
+  const img = new Image();
+  img.decoding = "async";
+  img.src = url;
+  void img.decode?.().catch(() => {});
+}
+
+function warmVideo(url: string): void {
+  const loader = document.createElement("video");
+  loader.preload = "auto";
+  loader.muted = true;
+  loader.src = url;
+  loader.setAttribute("muted", "");
+  loader.setAttribute("aria-hidden", "true");
+  loader.style.cssText = "position:fixed;left:-2px;top:-2px;width:1px;height:1px;opacity:0;pointer-events:none";
+  document.body.append(loader);
+  warmLoaders.push(loader);
+}
+
+/**
+ * Fetch and decode the other mode's artwork while nothing is happening.
+ *
+ * A light↔dark switch swaps the wallpaper and every per-mode region image, and doing that
+ * fetch + decode at that moment is exactly the stall you feel on a multi-MB image. Warming
+ * it shortly after the current mode settles means the switch itself has nothing left to pay
+ * for. Idempotent: each URL is warmed once, and areas whose artwork is shared between the
+ * two modes are skipped entirely.
+ */
+function scheduleWarmOtherMode(value: SkinValue, mode: Mode): void {
+  if (warmTimer) clearTimeout(warmTimer);
+  warmTimer = setTimeout(() => {
+    warmTimer = null;
+    const other: Mode = mode === "dark" ? "light" : "dark";
+    for (const area of AREAS) {
+      const url = resolveAreaImage(value, area.id, other);
+      if (!url || url === resolveAreaImage(value, area.id, mode) || warmedUrls.has(url)) continue;
+      warmedUrls.add(url);
+      if (VIDEO_RE.test(url)) warmVideo(url);
+      else warmImage(url);
+    }
+  }, 250);
+}
+
+function disposeWarmers(): void {
+  if (warmTimer) {
+    clearTimeout(warmTimer);
+    warmTimer = null;
+  }
+  for (const loader of warmLoaders) loader.remove();
+  warmLoaders.length = 0;
+  warmedUrls.clear();
+}
+
 // ── theme cross-fade ────────────────────────────────────────────────────────
 
 let themeAnimTimer: ReturnType<typeof setTimeout> | null = null;
@@ -669,6 +729,7 @@ function applyAll(value: SkinValue, editingId: string | null, commit: Commit, mo
     // settings edit still forces a repaint so fit/offset changes take effect.
     else applyRegionImage(area.id, value, mode, !fade);
   }
+  scheduleWarmOtherMode(value, mode);
 }
 
 // ── repair pass ─────────────────────────────────────────────────────────────
@@ -1391,6 +1452,7 @@ export function apply(ctx: ClientContext): void {
         }
         document.body.removeAttribute(THEME_ANIM_ATTR);
         paintedWindowImage = null;
+        disposeWarmers();
         readSkinValue = null;
         readSkinMode = null;
         reapply = null;

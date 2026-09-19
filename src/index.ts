@@ -270,7 +270,10 @@ export function apply(ctx: HostContext): void {
                 const ext = filename.split(".").pop()!.toLowerCase();
                 const type =
                   ext === "svg" ? "image/svg+xml" : ext === "mp4" ? "video/mp4" : ext === "webm" ? "video/webm" : `image/${ext === "jpg" ? "jpeg" : ext}`;
-                res.writeHead(200, { "content-type": type, "cache-control": "no-cache" });
+                // A stored file never changes under its URL (the name is a UUID minted per
+                // upload), so let the browser keep it: without this the mode switch re-fetched
+                // the whole wallpaper every time, which is the stall you feel on a big image.
+                res.writeHead(200, { "content-type": type, "cache-control": "public, max-age=31536000, immutable" });
                 res.end(readFileSync(file));
                 return;
               }
