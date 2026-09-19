@@ -112,6 +112,16 @@ that height so the two read as equally sized neighbours.
 window layer and sticker videos — on both `playbackRate` (live) and `defaultPlaybackRate` (survives a
 `src` swap). The slider previews it against the live elements before the debounced write lands.
 
+**Cross-fading a mode switch.** DSH repaints its palette in one frame, so a theme flip reads as a cut.
+The plugin therefore opens a transition window *before* the switch: an attribute on `body`
+(`data-dsh-skin-theme-anim`) makes colour-bearing properties transition for 320 ms, which covers
+DSH's own chrome and our panel tint (CSS variables are not animatable themselves, but their consumers
+are). It is opened both by the switch and by `theme/change`, and only for a real light↔dark change —
+never on the first snapshot or a font-size-only change. The wallpaper gets a genuine cross-fade: a
+temporary fixed layer holds the incoming artwork and fades in over the outgoing one, and the real
+repaint happens only after the fade lands, in that order, so nothing flashes. Image → video falls back
+to the palette fade, because swapping video sources in place would need two live `<video>` elements.
+
 ## Teardown contract
 
 Everything the plugin adds is registered on its own fiber and undone in `disposeSkinDom()`: window

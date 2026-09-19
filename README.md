@@ -15,6 +15,9 @@ sidebar and the composer. Everything is configured from a settings submenu and s
   completely separately. A sun/moon switch beside Settings at the sidebar foot toggles the real DSH
   theme and is sized to match the Settings button. Areas with no image for a mode fall back to the
   shared one, so a config from before per-mode support keeps working.
+- **Smooth mode switch** — flipping light/dark cross-fades: for ~320 ms the colour-bearing
+  properties transition across the whole UI (and the plugin's own tint follows), and a wallpaper that
+  differs per mode cross-fades between the two images instead of snapping.
 - **Video playback rate** — one slider sets the playback speed of every video the plugin renders
   (window wallpaper and sticker videos), applied live and remembered across restarts.
 - **Two draggable stickers** — anchor an image to the composer seat or the sidebar column; drag to
