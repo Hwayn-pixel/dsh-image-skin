@@ -1,6 +1,6 @@
 {
   "name": "dsh-image-skin",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Region & sticker image skin for the DSH (DeepSeek Harness) web UI - paint the window, center, sidebar, welcome, right panel and composer with your own images, GIFs or videos, plus two draggable stickers, from a settings submenu.",
   "type": "module",
   "main": "lib/index.js",

@@ -3,6 +3,16 @@
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
 > Each version starts with a Chinese summary, followed by the detailed English entries.
 
+## 0.1.1 — 2026-09-19
+
+**中文摘要** — 元数据与文档修正，无功能改动：README 顶部明确本插件与 GitHub 上几个同名 `dsh-image-skin` 项目的区别（我们是「区域 + 角标」那个，不是自动配色器）；修掉安装段残留的 `CHANGE-ME` 占位链接；整理 `package.json` 元数据（`repository` / `bugs` / `homepage` 指向真实仓库，补 `image` / `gif` / `video` 关键词）。
+
+Metadata and documentation only — no behaviour change.
+
+- README: state the difference from the other GitHub projects sharing the `dsh-image-skin` name (this one paints regions and stickers; it is not a palette adapter).
+- README: replace the leftover `CHANGE-ME` placeholder clone URL in the install section.
+- package.json: point `repository`, `bugs` and `homepage` at the real repository, normalise `repository.url` to the `git+` form, and add `image` / `gif` / `video` keywords.
+
 ## 0.1.0 — 2026-09-13
 
 **中文摘要** — 首个公开版本。项目最初是私人作品（宿主半：设置命名空间 + 本地上传/存储/服务；浏览器半：区域贴图、可拖拽角标、设置二级菜单），本次为公开发布做了加固，并为宿主半补上离线测试。
