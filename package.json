@@ -1,7 +1,7 @@
 {
     "name":  "dsh-image-skin",
     "version":  "0.1.0",
-    "description":  "Image skin for the DSH (DeepSeek Harness) web UI 鈥?replace large UI regions (window / center / sidebar / welcome / rightpanel / composer) with your own images or video, plus draggable stickers, from a settings submenu.",
+    "description":  "Image skin for the DSH (DeepSeek Harness) web UI 閳?replace large UI regions (window / center / sidebar / welcome / rightpanel / composer) with your own images or video, plus draggable stickers, from a settings submenu.",
     "type":  "module",
     "main":  "lib/index.js",
     "exports":  {
@@ -35,11 +35,11 @@
     "license":  "MIT",
     "author":  "Hwayn",
     "contributors":  [
-                         "Yucheng Xiao (鑲栧畤鎴?"
+                         "Yucheng Xiao (閼叉牕鐣ら幋?"
                      ],
     "repository":  {
                        "type":  "git",
-                       "url":  "https://github.com/hwayn-pixel/dsh-image-skin.git"
+                       "url":  "https://github.com/Hwayn-pixel/dsh-image-skin.git"
                    },
     "bugs":  {
                  "url":  "https://github.com/CHANGE-ME/dsh-image-skin/issues"
