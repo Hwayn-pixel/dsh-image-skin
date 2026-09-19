@@ -4,6 +4,10 @@ Image skin for the **DSH (DeepSeek Harness) web UI**: give the big regions of th
 images — including a looping **video** backdrop — and stick draggable, resizable stickers onto the
 sidebar and the composer. Everything is configured from a settings submenu and stays on your machine.
 
+> **Not a palette adapter.** This plugin paints *regions and stickers* (static image / GIF / video) —
+> it does not sample one picture to auto-generate a theme palette. A few other projects share the
+> `dsh-image-skin` name on GitHub; this one is the region-and-sticker one.
+
 > 中文说明见下方 [中文](#中文说明)。
 
 ## About / 关于
@@ -55,7 +59,7 @@ that profile.
 dsh plugin --profile web add dsh-image-skin
 
 #    ...or from a local checkout
-git clone https://github.com/CHANGE-ME/dsh-image-skin.git
+git clone https://github.com/Hwayn-pixel/dsh-image-skin.git
 cd dsh-image-skin
 npm install
 npm run build
@@ -130,6 +134,10 @@ MIT — see [LICENSE](LICENSE).
 DSH（DeepSeek Harness）Web UI 的**通用图片皮肤插件**：只改「几个大块区域」，给窗口背景 / 中栏 /
 侧边栏 / 欢迎页 / 右栏 / 输入区换上你自己的图片或视频，另外可以往侧栏和输入框贴两个能拖动、能缩放的角标。
 配置全部在设置里，图片只存本机。
+
+> **不是配色适配器。** 本插件做的是「贴区域 + 贴角标」（静态图 / GIF / 视频），
+> 不会拿一张图去自动生成主题配色。GitHub 上有几个同名的 `dsh-image-skin` 项目——
+> 我们这个是「区域 + 角标」那个。
 
 **特性**
 

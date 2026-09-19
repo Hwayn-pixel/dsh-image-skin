@@ -1,84 +1,85 @@
 {
-    "name":  "dsh-image-skin",
-    "version":  "0.1.0",
-    "description":  "Image skin for the DSH (DeepSeek Harness) web UI 閳?replace large UI regions (window / center / sidebar / welcome / rightpanel / composer) with your own images or video, plus draggable stickers, from a settings submenu.",
-    "type":  "module",
-    "main":  "lib/index.js",
-    "exports":  {
-                    ".":  "./lib/index.js",
-                    "./client":  "./lib/client.js",
-                    "./package.json":  "./package.json"
-                },
-    "dsh":  {
-                "bundle":  {
-                               "patch":  "./cordis.patch.yml"
-                           },
-                "client":  {
-                               "inject":  [
-
-                                          ],
-                               "platform":  "web"
-                           }
-            },
-    "keywords":  [
-                     "dsh",
-                     "deepseek-harness",
-                     "cordis",
-                     "cordis-plugin",
-                     "plugin",
-                     "web-ui",
-                     "theme",
-                     "skin",
-                     "wallpaper",
-                     "background"
-                 ],
-    "license":  "MIT",
-    "author":  "Hwayn",
-    "contributors":  [
-                         "Yucheng Xiao (閼叉牕鐣ら幋?"
-                     ],
-    "repository":  {
-                       "type":  "git",
-                       "url":  "https://github.com/Hwayn-pixel/dsh-image-skin.git"
-                   },
-    "bugs":  {
-                 "url":  "https://github.com/CHANGE-ME/dsh-image-skin/issues"
-             },
-    "homepage":  "https://github.com/CHANGE-ME/dsh-image-skin#readme",
-    "publishConfig":  {
-                          "access":  "public"
-                      },
-    "engines":  {
-                    "node":  "\u003e=20"
-                },
-    "dependencies":  {
-                         "@deepseek-ai/schemastery":  "^3.18.1"
-                     },
-    "peerDependencies":  {
-                             "react":  "^18.2.0"
-                         },
-    "devDependencies":  {
-                            "typescript":  "~5.6.3",
-                            "@types/node":  "22",
-                            "@types/react":  "~18.3.1",
-                            "react":  "18.2.0"
-                        },
-    "files":  [
-                  "lib",
-                  "src",
-                  "scripts",
-                  "test",
-                  "cordis.patch.yml",
-                  "README.md",
-                  "CHANGELOG.md",
-                  "LICENSE"
-              ],
-    "scripts":  {
-                    "build":  "node build.mjs",
-                    "watch":  "node build.mjs --watch",
-                    "test":  "node test/host.test.mjs \u0026\u0026 node test/client-units.test.mjs",
-                    "typecheck":  "tsc --noEmit",
-                    "install-plugin":  "node scripts/install.mjs",
-                    "prepublishOnly":  "node build.mjs"
-                }
+  "name": "dsh-image-skin",
+  "version": "0.1.0",
+  "description": "Region & sticker image skin for the DSH (DeepSeek Harness) web UI - paint the window, center, sidebar, welcome, right panel and composer with your own images, GIFs or videos, plus two draggable stickers, from a settings submenu.",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis",
+    "cordis-plugin",
+    "plugin",
+    "web-ui",
+    "theme",
+    "skin",
+    "wallpaper",
+    "background",
+    "image",
+    "gif",
+    "video"
+  ],
+  "license": "MIT",
+  "author": "Hwayn",
+  "contributors": [
+    "Yucheng Xiao (肖宇成)"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Hwayn-pixel/dsh-image-skin.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Hwayn-pixel/dsh-image-skin/issues"
+  },
+  "homepage": "https://github.com/Hwayn-pixel/dsh-image-skin#readme",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.1"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "typescript": "~5.6.3",
+    "@types/node": "22",
+    "@types/react": "~18.3.1",
+    "react": "18.2.0"
+  },
+  "files": [
+    "lib",
+    "src",
+    "scripts",
+    "test",
+    "cordis.patch.yml",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "test": "node test/host.test.mjs && node test/client-units.test.mjs",
+    "typecheck": "tsc --noEmit",
+    "install-plugin": "node scripts/install.mjs",
+    "prepublishOnly": "node build.mjs"
+  }
 }
