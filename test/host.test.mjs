@@ -158,6 +158,11 @@ console.log("== serve ==");
   const r = await call("GET", urlA);
   check("GET file -> 200", r.status === 200, `got ${r.status}`);
   check("content-type image/png", r.headers?.["content-type"] === "image/png", String(r.headers?.["content-type"]));
+  check(
+    "served immutable (a stored UUID never changes under its URL)",
+    /immutable/.test(String(r.headers?.["cache-control"] ?? "")),
+    String(r.headers?.["cache-control"]),
+  );
   check("bytes round-trip", Buffer.compare(Buffer.from(r.body), Buffer.from(PNG, "base64")) === 0);
 }
 check("traversal filename -> 404", (await call("GET", "/dsh-image-skin/files/..%2F..%2Fsettings.yaml")).status === 404);
