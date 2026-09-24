@@ -3,6 +3,35 @@
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
 > Each version starts with a Chinese summary, followed by the detailed English entries.
 
+## 0.3.0 — 2026-09-24
+
+**中文摘要** — 设置页重做 + 切换更顺：①取消「先选模式、再跳进另一个页面」的两级结构，改成**一屏到底**：顶部分段控件只当「正在编辑哪一套图」的过滤器，界面区域 / 角标 / 全局效果 / 存储全部常驻；②补上原本缺失的「**上传共用图**」入口（以前只能清、不能设）；③每个区域一行卡片：缩略图 + 名称 + **来源标签**（浅色专用 / 两模式共用 / 未设置）+ 操作；④修掉大页面上切浅/深色时的卡顿——不再让浏览器过渡 `color`（容器里几千个继承 `currentColor` 的图标会跟着全量重绘），大 DOM 下只过渡背景与描边。
+
+> 版本号从 0.1.1 跳到 0.3.0：0.2.0 曾用于一次已撤回的发布（npm 上已弃用），不再复用。
+
+A settings-page rebuild plus a smoother theme switch.
+
+### Changed
+- **Settings is one screen now.** The old flow was two levels: a mode picker, then a separate page per mode,
+  with the global sliders vanishing while you were in there. Mode is now a segmented control at the top that
+  only chooses *which set of images you are editing*; the area groups, the global sliders and storage stay put.
+- **Every area is a card**: thumbnail, name, a provenance tag (`浅色专用` / `两模式共用` / `未设置`), and its controls —
+  the previous layout left the middle column starved of width once the buttons grew, which wrapped the label
+  one character per line.
+- Controls are quieter: the shared-image upload only appears when there is no shared image yet, and clear only
+  when there is something to clear.
+
+### Added
+- **Shared-image upload.** A per-mode image already fell back to `<area>Image`, but nothing in the UI could ever
+  *set* that fallback — it could only be cleared. Each area now offers it directly.
+
+### Fixed
+- **Stutter when flipping light/dark on a large page.** The transition animated `background-color`, `color` and
+  `border-color` on the big surfaces; because thousands of descendants inherit `currentColor`, animating `color`
+  repainted all of them every frame. On a large DOM the transition now covers backgrounds and borders only —
+  which is where nearly all of the perceived smoothness comes from — while text switches a frame earlier, which
+  the eye does not catch.
+
 ## 0.1.1 — 2026-09-19
 
 **中文摘要** — 元数据与文档修正，无功能改动：README 顶部明确本插件与 GitHub 上几个同名 `dsh-image-skin` 项目的区别（我们是「区域 + 角标」那个，不是自动配色器）；修掉安装段残留的 `CHANGE-ME` 占位链接；整理 `package.json` 元数据（`repository` / `bugs` / `homepage` 指向真实仓库，补 `image` / `gif` / `video` 关键词）。

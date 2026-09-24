@@ -110,18 +110,74 @@ function ensureBaseStyles(): void {
   const style = document.createElement("style");
   style.id = STYLE_ID;
   style.textContent = [
-    ".dshImgSkin-shell{display:flex;flex-direction:column;gap:10px;padding:4px 0 16px}",
-    ".dshImgSkin-row{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.25));border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:10px;background:var(--dsw-alias-bg-layer-1,transparent)}",
-    ".dshImgSkin-head{display:flex;justify-content:space-between;align-items:center;gap:12px}",
-    ".dshImgSkin-title{font-weight:600}",
-    ".dshImgSkin-hint{font-size:12px;opacity:.65;display:block;margin-top:3px}",
-    ".dshImgSkin-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}",
-    ".dshImgSkin-thumb{width:140px;height:78px;object-fit:cover;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.25));background:rgba(128,128,128,.08)}",
-    ".dshImgSkin-btn{cursor:pointer;padding:5px 10px;border-radius:8px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));background:transparent;color:inherit;font:inherit}",
+    // ── shell ──────────────────────────────────────────────────────────────────
+    ".dshImgSkin-shell{display:flex;flex-direction:column;gap:14px;padding:2px 0 20px}",
+    ".dshImgSkin-intro{font-size:12px;line-height:1.6;opacity:.62;margin:0}",
+    ".dshImgSkin-banner{font-size:12px;line-height:1.5;border-radius:8px;padding:7px 11px;margin:0;",
+    "background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#d9534f) 12%,transparent);",
+    "color:var(--dsw-alias-state-error-primary,#d9534f)}",
+    ".dshImgSkin-ok{font-size:12px;opacity:.72;margin:0}",
+
+    // ── section card ──────────────────────────────────────────────────────────
+    ".dshImgSkin-card{border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:14px;",
+    "background:var(--dsw-alias-bg-layer-1,transparent);padding:14px 16px;display:flex;flex-direction:column;gap:12px}",
+    ".dshImgSkin-cardhead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}",
+    ".dshImgSkin-title{font-weight:600;font-size:13.5px;letter-spacing:.2px}",
+    ".dshImgSkin-sub{font-size:11.5px;line-height:1.55;opacity:.58;margin:3px 0 0}",
+    ".dshImgSkin-hint{font-size:11.5px;line-height:1.55;opacity:.58;display:block;margin-top:3px}",
+
+    // ── segmented control (mode filter) ───────────────────────────────────────
+    ".dshImgSkin-seg{display:inline-flex;gap:2px;padding:3px;border-radius:11px;",
+    "background:color-mix(in srgb,currentColor 9%,transparent);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.22))}",
+    ".dshImgSkin-seg>button{cursor:pointer;border:0;background:transparent;color:inherit;font:inherit;font-size:12.5px;",
+    "padding:5px 13px;border-radius:8px;display:inline-flex;align-items:center;gap:6px;opacity:.66;transition:background .15s,opacity .15s}",
+    ".dshImgSkin-seg>button:hover{opacity:.9}",
+    ".dshImgSkin-seg>button[data-on='true']{opacity:1;font-weight:600;background:var(--dsw-alias-bg-layer-2,rgba(128,128,128,.16));",
+    "box-shadow:0 1px 2px rgba(0,0,0,.10)}",
+
+    // ── area grid ─────────────────────────────────────────────────────────────
+    ".dshImgSkin-areas{display:flex;flex-direction:column;gap:10px}",
+    ".dshImgSkin-area{display:grid;grid-template-columns:96px minmax(0,1fr);gap:8px 14px;align-items:center;",
+    "border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.18));border-radius:12px;padding:10px 12px;",
+    "background:var(--dsw-alias-bg-layer-1,transparent);transition:border-color .15s,background .15s}",
+    ".dshImgSkin-area>.dshImgSkin-thumb,.dshImgSkin-area>.dshImgSkin-thumblet{grid-row:1 / span 2}",
+    ".dshImgSkin-area:hover{border-color:var(--dsw-alias-border-l2,rgba(128,128,128,.34))}",
+    ".dshImgSkin-area[data-off='true']{opacity:.5}",
+    ".dshImgSkin-area[data-editing='true']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);",
+    "box-shadow:0 0 0 1px var(--dsw-alias-brand-primary,#5aa7d8) inset}",
+    ".dshImgSkin-thumb{width:96px;height:56px;object-fit:cover;border-radius:8px;display:block;",
+    "border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.2));background:color-mix(in srgb,currentColor 6%,transparent)}",
+    ".dshImgSkin-thumblet{position:relative;width:96px;height:56px;border-radius:8px;display:grid;place-items:center;",
+    "border:1px dashed var(--dsw-alias-border-l2,rgba(128,128,128,.32));font-size:10.5px;opacity:.5}",
+    ".dshImgSkin-met{display:flex;flex-direction:column;gap:2px;min-width:0}",
+    ".dshImgSkin-name{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px}",
+    ".dshImgSkin-src{font-size:11px;opacity:.55;line-height:1.5}",
+    ".dshImgSkin-tag{font-size:10px;font-weight:500;padding:1px 6px;border-radius:99px;letter-spacing:.2px;",
+    "border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));opacity:.8}",
+    ".dshImgSkin-tag[data-kind='mode']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);",
+    "color:var(--dsw-alias-brand-primary,#5aa7d8);opacity:1}",
+    ".dshImgSkin-tag[data-kind='none']{opacity:.45}",
+    ".dshImgSkin-ops{grid-column:1 / -1;display:flex;gap:6px;align-items:center;flex-wrap:wrap}",
+
+    // ── controls ──────────────────────────────────────────────────────────────
+    ".dshImgSkin-btn{cursor:pointer;padding:5px 11px;border-radius:8px;font:inherit;font-size:12px;",
+    "border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));background:transparent;color:inherit;white-space:nowrap;",
+    "transition:background .15s,border-color .15s}",
     ".dshImgSkin-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}",
     ".dshImgSkin-btn[disabled]{opacity:.5;cursor:not-allowed}",
     ".dshImgSkin-btn[data-active='true']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);color:var(--dsw-alias-brand-primary,#5aa7d8)}",
+    ".dshImgSkin-btn[data-variant='primary']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);color:var(--dsw-alias-brand-primary,#5aa7d8)}",
+    ".dshImgSkin-btn[data-variant='quiet']{border-color:transparent;opacity:.7}",
+    ".dshImgSkin-btn[data-variant='quiet']:hover{opacity:1;background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}",
+    ".dshImgSkin-switch{display:inline-flex;align-items:center;gap:6px;font-size:12px;opacity:.85;cursor:pointer;user-select:none}",
+    ".dshImgSkin-slider{display:flex;flex-direction:column;gap:6px}",
+    ".dshImgSkin-slider input[type=range]{width:100%;margin:0}",
+    ".dshImgSkin-sliderhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px}",
+    ".dshImgSkin-value{font-size:12px;font-variant-numeric:tabular-nums;opacity:.75}",
+    ".dshImgSkin-fit{display:inline-flex;align-items:center;gap:5px}",
+    ".dshImgSkin-fitlabel{font-size:11.5px;opacity:.55}",
     "[data-dsh-skin-editing='true']{outline:2px dashed var(--dsw-alias-brand-primary,#5aa7d8);outline-offset:2px}",
+
     // Theme switch: for one short window the palette transitions instead of snapping.
     //
     // background-color / color / border-color are *not* compositor properties: the browser
@@ -133,7 +189,15 @@ function ensureBaseStyles(): void {
     //          nodes snap instead of dragging the whole frame rate down with them.
     // `fill`/`stroke` are redundant (icons inherit `currentColor`), shadows barely differ
     // between the two palettes, and pseudo-elements doubled the matched-element count.
-    `body[${THEME_ANIM_ATTR}="full"],body[${THEME_ANIM_ATTR}="full"] *,`,
+    `body[${THEME_ANIM_ATTR}="full"],body[${THEME_ANIM_ATTR}="full"] *{`,
+    "transition-property:background-color,color,border-color !important;",
+    `transition-duration:${THEME_ANIM_MS}ms !important;`,
+    "transition-timing-function:cubic-bezier(.4,0,.2,1) !important;",
+    "transition-delay:0s !important;}",
+    // Large DOM: backgrounds only. Animating `color` on these containers repaints every
+    // descendant that inherits `currentColor` (thousands of icons and labels), which is the
+    // stutter users feel. A fading background carries almost all of the perceived smoothness;
+    // text snapping a beat earlier is not something the eye catches.
     `body[${THEME_ANIM_ATTR}="lite"],`,
     `body[${THEME_ANIM_ATTR}="lite"] [class*="_sidebarCol"],`,
     `body[${THEME_ANIM_ATTR}="lite"] [class*="_centerCol"],`,
@@ -141,7 +205,7 @@ function ensureBaseStyles(): void {
     `body[${THEME_ANIM_ATTR}="lite"] [class*="_panelBody"],`,
     `body[${THEME_ANIM_ATTR}="lite"] [class*="_composerSeat"],`,
     `body[${THEME_ANIM_ATTR}="lite"] [class*="_hero"]{`,
-    "transition-property:background-color,color,border-color !important;",
+    "transition-property:background-color,border-color !important;",
     `transition-duration:${THEME_ANIM_MS}ms !important;`,
     "transition-timing-function:cubic-bezier(.4,0,.2,1) !important;",
     "transition-delay:0s !important;}",
@@ -276,9 +340,13 @@ const stickerSignatures: Record<string, string> = {};
 /** Above this many elements the transition is scoped to the big surfaces only. */
 const THEME_ANIM_HEAVY_ELEMENTS = 1500;
 
+
 /**
  * Open a short window in which colours transition. Called immediately *before* the theme
  * changes, so the transition is already in place when new values land.
+ *
+ * Kept for theme changes we did *not* initiate (e.g. the user flips DSH's own Appearance
+ * setting): there a cover would flicker for nothing, and a short scoped transition still helps.
  */
 function startThemeAnimation(): void {
   const body = document.body;
@@ -1025,7 +1093,7 @@ function SliderRow(props: {
   );
 }
 
-/** One area row: mode-aware thumbnail, upload target, clear, fit, sticker editor. */
+/** One area card: thumbnail, source tag, upload (per-mode or shared), clear, fit, sticker editor. */
 function AreaRow(props: {
   area: AreaDef;
   value: SkinValue;
@@ -1046,27 +1114,67 @@ function AreaRow(props: {
   const specific = String(v[specificField] ?? "");
   const sharedImage = String(v[sharedField] ?? "");
   const effective = resolveAreaImage(v, area.id, props.mode);
-  const source = specific ? `${modeWord}专用` : sharedImage ? "共用图（两个模式都用）" : "未设置";
+  const sourceKind = specific ? "mode" : sharedImage ? "shared" : "none";
+  const sourceLabel =
+    sourceKind === "mode" ? `${modeWord}专用` : sourceKind === "shared" ? "两模式共用" : "未设置";
   const enabled = v[`${area.id}Enabled`] !== false;
   const fit = String(v[`${area.id}Fit`] ?? "cover");
   const isVideo = effective.length > 0 && VIDEO_RE.test(effective);
-  const button = (key: string, label: string, onClick: () => void, active = false) =>
-    h("button", { key, type: "button", className: "dshImgSkin-btn", "data-active": String(active), onClick }, label);
+  const busy = props.busyField === specificField;
+
+  // A file picker bound to one target field. Rendered as a label so the whole button is
+  // clickable; the input itself stays hidden.
+  const picker = (key: string, label: string, field: string, variant?: string) =>
+    h(
+      "label",
+      { key, className: "dshImgSkin-btn", "data-variant": variant },
+      props.busyField === field ? "上传中…" : label,
+      h("input", {
+        type: "file",
+        accept: "image/*,video/*",
+        style: { display: "none" },
+        onChange: (e: any) => {
+          const file = e.target.files?.[0];
+          if (file) props.onPick(file, field);
+          e.target.value = "";
+        },
+      }),
+    );
+
   return h(
     "div",
-    { className: "dshImgSkin-row", key: area.id },
+    {
+      className: "dshImgSkin-area",
+      key: area.id,
+      "data-off": String(!enabled),
+      "data-editing": String(props.editing),
+    },
+    // 1) preview
+    effective
+      ? isVideo
+        ? h("video", { className: "dshImgSkin-thumb", src: effective, muted: true, loop: true, autoPlay: true, playsInline: true })
+        : h("img", { className: "dshImgSkin-thumb", src: effective, alt: "" })
+      : h("div", { className: "dshImgSkin-thumblet" }, "未设置"),
+    // 2) name + provenance
     h(
       "div",
-      { className: "dshImgSkin-head" },
+      { className: "dshImgSkin-met" },
       h(
         "div",
-        null,
-        h("span", { className: "dshImgSkin-title" }, area.label),
-        h("small", { className: "dshImgSkin-hint" }, `${area.hint} · 生效来源：${source}`),
+        { className: "dshImgSkin-name" },
+        area.label,
+        h("span", { className: "dshImgSkin-tag", "data-kind": sourceKind }, sourceLabel),
       ),
+      h("div", { className: "dshImgSkin-src" }, area.hint),
+      props.editing ? h("div", { className: "dshImgSkin-src" }, "拖动图片移动位置，拖右下角圆点缩放。") : null,
+    ),
+    // 3) controls
+    h(
+      "div",
+      { className: "dshImgSkin-ops" },
       h(
         "label",
-        { className: "dshImgSkin-actions" },
+        { className: "dshImgSkin-switch" },
         h("input", {
           type: "checkbox",
           checked: enabled,
@@ -1074,51 +1182,55 @@ function AreaRow(props: {
         }),
         "启用",
       ),
-    ),
-    effective
-      ? isVideo
-        ? h("video", { className: "dshImgSkin-thumb", src: effective, muted: true, loop: true, autoPlay: true, playsInline: true })
-        : h("img", { className: "dshImgSkin-thumb", src: effective, alt: "" })
-      : null,
-    h(
-      "div",
-      { className: "dshImgSkin-actions" },
-      h(
-        "label",
-        { className: "dshImgSkin-btn" },
-        props.busyField === specificField ? "上传中…" : `上传${modeWord}模式图片/视频`,
-        h("input", {
-          type: "file",
-          accept: "image/*,video/*",
-          style: { display: "none" },
-          onChange: (e: any) => {
-            const file = e.target.files?.[0];
-            if (file) props.onPick(file, specificField);
-            e.target.value = "";
-          },
-        }),
-      ),
-      specific ? button("clear-mode", "清除", () => props.onClear(specificField)) : null,
-      !specific && sharedImage ? button("clear-shared", "清除共用图", () => props.onClear(sharedField)) : null,
+      picker("up-mode", `上传${modeWord}图`, specificField, "primary"),
+      // Only offered when there is no shared image yet - otherwise the 清除 button already
+      // covers it, and two near-identical upload buttons side by side just add noise.
+      sharedImage ? null : picker("up-shared", "上传共用图", sharedField, "quiet"),
+      effective
+        ? h(
+            "button",
+            {
+              key: "clear",
+              type: "button",
+              className: "dshImgSkin-btn",
+              "data-variant": "quiet",
+              onClick: () => props.onClear(sourceKind === "shared" ? sharedField : specificField),
+            },
+            sourceKind === "shared" ? "清除共用图" : "清除",
+          )
+        : null,
       area.kind === "region"
         ? h(
-            "select",
-            {
-              key: "fit",
-              className: "dshImgSkin-btn",
-              value: fit,
-              onChange: (e: any) => props.onSet(`${area.id}Fit`, e.target.value),
-            },
-            h("option", { value: "cover" }, "铺满"),
-            h("option", { value: "contain" }, "适应"),
-            h("option", { value: "tile" }, "平铺"),
+            "span",
+            { key: "fit", className: "dshImgSkin-fit" },
+            h("span", { className: "dshImgSkin-fitlabel" }, "填充"),
+            h(
+              "select",
+              {
+                className: "dshImgSkin-btn",
+                value: fit,
+                onChange: (e: any) => props.onSet(`${area.id}Fit`, e.target.value),
+              },
+              h("option", { value: "cover" }, "铺满"),
+              h("option", { value: "contain" }, "适应"),
+              h("option", { value: "tile" }, "平铺"),
+            ),
           )
         : null,
       area.kind === "sticker" && effective
-        ? button("edit-pos", props.editing ? "完成" : "编辑位置", () => props.onToggleEdit(area.id), props.editing)
+        ? h(
+            "button",
+            {
+              key: "edit-pos",
+              type: "button",
+              className: "dshImgSkin-btn",
+              "data-active": String(props.editing),
+              onClick: () => props.onToggleEdit(area.id),
+            },
+            props.editing ? "完成" : "编辑位置",
+          )
         : null,
     ),
-    props.editing ? h("small", { className: "dshImgSkin-hint" }, "拖动图片移动位置，拖右下角圆点缩放。") : null,
   );
 }
 
@@ -1169,8 +1281,6 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
     const [editingId, setEditingId] = React.useState<string | null>(currentEditing);
     const [notice, setNotice] = React.useState<string | null>(null);
     const [gcStatus, setGcStatus] = React.useState<string | null>(null);
-    // Level 2 = the mode picker (plus the global sliders); level 3 = one mode's image menu.
-    const [view, setView] = React.useState<"menu" | "mode">("menu");
 
     const upload = async (field: string, file: File) => {
       setNotice(null);
@@ -1206,99 +1316,150 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       }
     };
 
+    const regionAreas = AREAS.filter((a) => a.kind === "region");
+    const stickerAreas = AREAS.filter((a) => a.kind === "sticker");
+
+    const rowProps = (area: AreaDef) => ({
+      key: area.id,
+      area,
+      value: v,
+      mode,
+      busyField: busy,
+      editing: editingId === area.id,
+      onPick: (file: File, field: string) => void upload(field, file),
+      onSet: (field: string, val: unknown) => void scope.set(field, val),
+      onClear: (field: string) => {
+        void (async () => {
+          await scope.set(field, "");
+          scheduleCollectUnused();
+        })();
+      },
+      onToggleEdit: (id: string) => {
+        const next = editingId === id ? null : id;
+        setEditingId(next);
+        setEditing(next);
+      },
+    });
+
+    const areaGroup = (title: string, note: string, list: AreaDef[]) =>
+      h(
+        "div",
+        { className: "dshImgSkin-card" },
+        h(
+          "div",
+          { className: "dshImgSkin-cardhead" },
+          h(
+            "div",
+            null,
+            h("span", { className: "dshImgSkin-title" }, title),
+            h("p", { className: "dshImgSkin-sub" }, note),
+          ),
+        ),
+        h("div", { className: "dshImgSkin-areas" }, list.map((area) => h(AreaRow, rowProps(area)))),
+      );
+
+    // Mode is a *filter over one page*, not a second screen. Switching changes which set of
+    // images you are editing (and flips the live theme so you can see it), while the area list,
+    // the global sliders and storage stay exactly where they are.
+    const modeSeg = h(
+      "div",
+      { className: "dshImgSkin-seg" },
+      (["light", "dark"] as Mode[]).map((m) =>
+        h(
+          "button",
+          {
+            key: m,
+            type: "button",
+            "data-on": String(mode === m),
+            onClick: () => modeStore.pick(m),
+          },
+          m === "dark" ? h(MoonIcon, { size: 13 }) : h(SunIcon, { size: 13 }),
+          modeLabel(m),
+        ),
+      ),
+    );
+
     return h(
       "div",
       { className: "dshImgSkin-shell" },
       h(
         "p",
-        { className: "dshImgSkin-hint" },
-        "给每个区域/角标上传图片。图片只存在本机（$DSH_HOME/image-skin），不会上传到外部服务。角标可点「编辑位置」后拖动/缩放。",
+        { className: "dshImgSkin-intro" },
+        "给界面各区域换上你自己的图片或视频；图片只存在本机（$DSH_HOME/image-skin），不会上传到外部服务。",
       ),
-      notice ? h("p", { className: "dshImgSkin-hint", style: { color: "#d9534f" } }, notice) : null,
-      view === "menu"
-        ? h(
-            "div",
-            { className: "dshImgSkin-row" },
-            h(
-              "div",
-              { className: "dshImgSkin-head" },
-              h(
-                "div",
-                null,
-                h("span", { className: "dshImgSkin-title" }, "选择要配置的模式"),
-                h(
-                  "small",
-                  { className: "dshImgSkin-hint" },
-                  "浅色和深色各有一套独立的图，互不影响。点下面的按钮会同时把界面切到该模式，边配边看。",
-                ),
-              ),
-            ),
-            h(ModeSwitch, {
-              mode,
-              variant: "card",
-              onPick: (m: Mode) => {
-                modeStore.pick(m);
-                setView("mode");
-              },
-            }),
-          )
-        : h(
-            "div",
-            { className: "dshImgSkin-row" },
-            h(
-              "div",
-              { className: "dshImgSkin-head" },
-              h(
-                "div",
-                null,
-                h("span", { className: "dshImgSkin-title" }, `${mode === "dark" ? "深色" : "浅色"}模式 · 区域配图`),
-                h("small", { className: "dshImgSkin-hint" }, "这里的每一项都只作用于当前模式；点「返回」回到模式选择。"),
-              ),
-              h("button", { className: "dshImgSkin-btn", type: "button", onClick: () => setView("menu") }, "← 返回"),
-            ),
-          ),
-      view === "menu"
-        ? h(SliderRow, {
-            key: "opacity",
-            title: "面板不透明度",
-            hint: "越低越能透出壁纸；角标贴图会同步变淡，壁纸本身不受影响",
-            value: Number(v.panelOpacity ?? 100),
-            min: 0,
-            max: 100,
-            step: 1,
-            format: (n: number) => `${n}%`,
-            onPreview: (n: number) => applyPanelOpacity({ ...v, panelOpacity: n }, mode),
-            onCommit: (n: number) => void scope.set("panelOpacity", n),
-          })
-        : null,
-      view === "menu"
-        ? h(SliderRow, {
-            key: "rate",
-            title: "视频播放速率",
-            hint: "作用于上传的视频（窗口壁纸与角标视频），拖动即时生效",
-            value: Number(v.videoPlaybackRate ?? 1),
-            min: 0.25,
-            max: 3,
-            step: 0.25,
-            format: (n: number) => `${n}×`,
-            onPreview: (n: number) => previewVideoRate(n),
-            onCommit: (n: number) => void scope.set("videoPlaybackRate", n),
-          })
-        : null,
-      view === "menu" &&
+      notice ? h("p", { className: "dshImgSkin-banner" }, notice) : null,
       h(
         "div",
-        { className: "dshImgSkin-row" },
+        { className: "dshImgSkin-card" },
         h(
           "div",
-          { className: "dshImgSkin-head" },
+          { className: "dshImgSkin-cardhead" },
+          h(
+            "div",
+            null,
+            h("span", { className: "dshImgSkin-title" }, "正在编辑"),
+            h(
+              "p",
+              { className: "dshImgSkin-sub" },
+              "浅色和深色各有一套图；切换时界面主题也会跟着切，方便边配边看。某个区域没单独配，会回退到「共用图」。",
+            ),
+          ),
+          modeSeg,
+        ),
+      ),
+      areaGroup("界面区域", "整窗口的底图与各块面板的背景。", regionAreas),
+      areaGroup("角标贴图", "贴在侧栏 / 输入框上，可拖动、可缩放。", stickerAreas),
+      h(
+        "div",
+        { className: "dshImgSkin-card" },
+        h(
+          "div",
+          { className: "dshImgSkin-cardhead" },
+          h(
+            "div",
+            null,
+            h("span", { className: "dshImgSkin-title" }, "全局效果"),
+            h("p", { className: "dshImgSkin-sub" }, "两个模式共用，拖动即时生效。"),
+          ),
+        ),
+        h(SliderRow, {
+          key: "opacity",
+          title: "面板不透明度",
+          hint: "越低越能透出壁纸；角标贴图会同步变淡，壁纸本身不受影响",
+          value: Number(v.panelOpacity ?? 100),
+          min: 0,
+          max: 100,
+          step: 1,
+          format: (n: number) => `${n}%`,
+          onPreview: (n: number) => applyPanelOpacity({ ...v, panelOpacity: n }, mode),
+          onCommit: (n: number) => void scope.set("panelOpacity", n),
+        }),
+        h(SliderRow, {
+          key: "rate",
+          title: "视频播放速率",
+          hint: "作用于上传的视频（窗口壁纸与角标视频），拖动即时生效",
+          value: Number(v.videoPlaybackRate ?? 1),
+          min: 0.25,
+          max: 3,
+          step: 0.25,
+          format: (n: number) => `${n}×`,
+          onPreview: (n: number) => previewVideoRate(n),
+          onCommit: (n: number) => void scope.set("videoPlaybackRate", n),
+        }),
+      ),
+      h(
+        "div",
+        { className: "dshImgSkin-card" },
+        h(
+          "div",
+          { className: "dshImgSkin-cardhead" },
           h(
             "div",
             null,
             h("span", { className: "dshImgSkin-title" }, "存储"),
             h(
-              "small",
-              { className: "dshImgSkin-hint" },
+              "p",
+              { className: "dshImgSkin-sub" },
               `图片存在 $DSH_HOME/image-skin，单文件上限 ${MAX_UPLOAD_MB} MB；换图或清除后不再被引用的旧文件会自动删除`,
             ),
           ),
@@ -1324,31 +1485,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
             "清理未使用图片",
           ),
         ),
-        gcStatus ? h("small", { className: "dshImgSkin-hint" }, gcStatus) : null,
-      ),
-      view === "mode" &&
-      AREAS.map((area) =>
-        h(AreaRow, {
-          key: area.id,
-          area,
-          value: v,
-          mode,
-          busyField: busy,
-          editing: editingId === area.id,
-          onPick: (file: File, field: string) => void upload(field, file),
-          onSet: (field: string, val: unknown) => void scope.set(field, val),
-          onClear: (field: string) => {
-            void (async () => {
-              await scope.set(field, "");
-              scheduleCollectUnused();
-            })();
-          },
-          onToggleEdit: (id: string) => {
-            const next = editingId === id ? null : id;
-            setEditingId(next);
-            setEditing(next);
-          },
-        }),
+        gcStatus ? h("p", { className: "dshImgSkin-ok" }, gcStatus) : null,
       ),
     );
   };
@@ -1486,6 +1623,7 @@ export function apply(ctx: ClientContext): void {
       onPick: (m: Mode) => modeStore.pick(m),
     });
   }
+
   ctx.slots.inject("sidebar.footer.action", () =>
     ctx.slots.register(
       {
