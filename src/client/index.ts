@@ -29,6 +29,8 @@ interface ThemeFace {
 /** Live editor state shared between the React section and the non-React renderer. */
 let currentEditing: string | null = null;
 let reapply: (() => void) | null = null;
+/** Re-run the accent with a patched value but WITHOUT writing settings - live slider previews. */
+let reapplyWith: ((patch: Record<string, unknown>) => void) | null = null;
 /** Re-stamp the accent on newly appeared chrome (dialogs, menus, popovers). */
 let refreshAccent: (() => void) | null = null;
 let finishButton: HTMLElement | null = null;
@@ -252,6 +254,12 @@ function ensureBaseStyles(): void {
     ".dshImgSkin-inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}",
     ".dshImgSkin-promptBox{font-size:11px;line-height:1.6;opacity:.7;padding:8px 10px;border-radius:8px;",
     "background:color-mix(in srgb,currentColor 6%,transparent);word-break:break-word}",
+    ".dshImgSkin-textarea{cursor:text;resize:vertical;min-height:76px;line-height:1.6;font-size:12px}",
+    ".dshImgSkin-frameCell{display:flex;flex-direction:column;gap:3px;align-items:center}",
+    ".dshImgSkin-frameOps{justify-content:center;font-size:11px}",
+    ".dshImgSkin-framePreview{width:96px;height:60px;object-fit:cover;border-radius:8px;",
+    "border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.3))}",
+    ".dshImgSkin-frameKnobs{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}",
     ".dshImgSkin-results{display:flex;gap:8px;flex-wrap:wrap}",
     ".dshImgSkin-result{cursor:pointer;padding:0;border-radius:10px;overflow:hidden;",
     "border:2px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));background:transparent;line-height:0}",
@@ -754,6 +762,8 @@ interface ArtworkReading {
 }
 
 const artworkCache = new Map<string, ArtworkReading>();
+/** Faded copies of a generated frame, keyed by url + alpha. */
+const fadeCache = new Map<string, string>();
 
 /**
  * Read the artwork once and keep the result. A video backdrop is re-read on demand (see the
@@ -1209,7 +1219,21 @@ function parseTriple(triple: string): { r: number; g: number; b: number } {
  *      the same ornament on both is what made the first attempt noisy;
  *   4. the tint always stays low-alpha, so the artwork behind is still the wallpaper.
  */
-function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: string, reading?: ArtworkReading | null): string {
+/** The knob a user gets for an applied frame: how thick, how strong, and where. */
+interface FrameOptions {
+  scale: number;
+  opacity: number;
+  controls: boolean;
+}
+
+function accentCss(
+  palette: string[],
+  level: number,
+  mode: Mode,
+  chosenFrame: string,
+  reading?: ArtworkReading | null,
+  frame: FrameOptions = { scale: 1, opacity: 1, controls: false },
+): string {
   const scheme = deriveScheme(palette, mode, reading?.light);
   const root = `body[${BODY_ATTR}][${ACCENT_ATTR}]`;
   const small = `${root} [${ACCENT_MARK}="small"]`;
@@ -1274,19 +1298,20 @@ function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: st
     return lines.join("\n");
   }
 
-  // From level 1 the *panels* wear a frame. Controls never do: a frame squashed into a 30px
-  // button is where "decorated" turns into "cheap", and the hairline above is what makes a
-  // control look like a control.
+  // From level 1 the *panels* wear a frame. Controls never do by default: a frame squashed into a
+  // 30px button is where "decorated" turns into "cheap", and the hairline is what makes a control
+  // look like a control. (`frame.controls` is the opt-in for people who want it anyway.)
   const art =
-    chosenFrame && level >= 3
+    chosenFrame && level >= 1
       ? `url("${chosenFrame}")`
-      : frameDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`, level >= 4 ? "rich" : level >= 2 ? "bracket" : "tick");
+      : frameDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`, level >= 2 ? "bracket" : "tick");
   // The frame is a fixed number of pixels per side, so a panel needs more of them than it looks:
   // a 9px frame on an 800px dialog scales its corner motif down to two pixels and vanishes. The
   // generated art is heavier per pixel, so it gets less width - at 18px it started covering the
-  // dialog's own title row.
-  const width = chosenFrame && level >= 3 ? (level >= 4 ? 20 : 14) : level >= 2 ? 12 : 8;
-  const slice = chosenFrame && level >= 3 ? 30 : 22;
+  // dialog's own title row. `frame.scale` lets the user trim it to the panel at hand.
+  const baseWidth = chosenFrame && level >= 1 ? 14 : level >= 2 ? 12 : 8;
+  const width = Math.max(3, Math.round(baseWidth * frame.scale));
+  const slice = chosenFrame && level >= 1 ? 30 : 22;
   lines.push(
     `${panel} {`,
     `  border: 1px solid transparent !important;`,
@@ -1297,7 +1322,44 @@ function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: st
     `  border-image-repeat: stretch !important;`,
     `}`,
   );
+  if (chosenFrame && frame.controls) {
+    lines.push(
+      `${small} {`,
+      `  border: 1px solid transparent !important;`,
+      `  border-image-source: ${art} !important;`,
+      `  border-image-slice: ${slice} !important;`,
+      `  border-image-width: ${Math.max(2, Math.round(6 * frame.scale))}px !important;`,
+      `  border-image-outset: 1px !important;`,
+      `  border-image-repeat: stretch !important;`,
+      `}`,
+    );
+  }
   return lines.join("\n");
+}
+
+/** Fade an image's alpha without touching its geometry, so "透明度" can apply to a生成的花纹. */
+async function fadeImage(url: string, alpha: number): Promise<string> {
+  const key = `${url}@${alpha.toFixed(2)}`;
+  const cached = fadeCache.get(key);
+  if (cached) return cached;
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = url;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return url;
+    ctx.globalAlpha = alpha;
+    ctx.drawImage(img, 0, 0);
+    const out = canvas.toDataURL("image/png");
+    fadeCache.set(key, out);
+    return out;
+  } catch {
+    return url;                                    // cross-origin or undecodable: keep as-is
+  }
 }
 
 /** Reflect the configured level + artwork onto the skeleton. */
@@ -1375,7 +1437,16 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
     style.id = ACCENT_STYLE_ID;
     document.head.append(style);
   }
-  style.textContent = accentCss(palette, effective, mode, String(value.accentFrame ?? ""), reading);
+  const frameUrl = String(value.accentFrame ?? "");
+  // The knobs for an applied frame: thickness, strength, and whether it also clothes controls.
+  const frameOpts: FrameOptions = {
+    scale: Math.min(1.6, Math.max(0.6, Number(value.accentFrameScale ?? 1) || 1)),
+    opacity: Math.min(1, Math.max(0.3, Number(value.accentFrameOpacity ?? 1) || 1)),
+    controls: value.accentFrameControls === true,
+  };
+  // "透明度" on a bitmap frame means fading its alpha, not washing out the panel behind it.
+  const artUrl = frameUrl && frameOpts.opacity < 1 ? await fadeImage(frameUrl, frameOpts.opacity) : frameUrl;
+  style.textContent = accentCss(palette, effective, mode, artUrl, reading, frameOpts);
 }
 
 function disposeAccent(): void {
@@ -2228,12 +2299,38 @@ function AccentRow(props: {
 }
 
 /**
- * AI ornament panel: pick a provider, supply a key, choose a strength, generate, keep one.
+ * The ornament workshop.
  *
- * The key may come from an environment variable (read-only here, never persisted) or from this
- * box. Everything network-facing happens in the host half - this component only sends the chosen
- * provider id and, when in manual mode, the typed key.
+ * Four jobs, in the order you actually do them, one card each:
+ *   1. who draws it      - provider, key, and a "检查" button that probes the key instead of making
+ *                          you wait for a real generation to find out it is wrong;
+ *   2. what to ask for   - style chips plus an *editable* prompt (the auto one is a starting point,
+ *                          not a cage); material and palette are filled in from the artwork;
+ *   3. how many          - count up front, size tucked into 高级 (a border is applied with 9-slice,
+ *                          so its pixel size barely matters);
+ *   4. what came back    - results are written to settings, so the wall survives leaving the page,
+ *                          and each one can be applied, downloaded or deleted on the spot.
+ *
+ * Progress is real: the host streams stages over SSE (submitted → queued → running → saving), which
+ * matters most on Alibaba's asynchronous endpoint where a job can queue for a minute or two.
  */
+const STYLE_PRESETS: { name: string; text: string }[] = [
+  { name: "极简", text: "minimal, one hairline and a single small corner mark" },
+  { name: "巴洛克", text: "baroque scrollwork, dense carving, deep relief" },
+  { name: "中式", text: "chinese lattice and cloud motif, fine ink lines" },
+  { name: "赛博", text: "cyber neon tubing, thin sharp angles" },
+  { name: "自然", text: "organic vine and leaf border, hand-drawn line" },
+  { name: "和纸", text: "washi paper fibre edge, soft uneven hand" },
+];
+
+interface FrameRecord {
+  url: string;
+  prompt: string;
+  provider: string;
+  model: string;
+  at: number;
+}
+
 function AiAccentPanel(props: {
   value: SkinValue;
   onSet: (field: string, val: unknown) => void;
@@ -2243,14 +2340,30 @@ function AiAccentPanel(props: {
   const v = props.value;
   const [providers, setProviders] = React.useState<Array<Record<string, unknown>> | null>(null);
   const [busy, setBusy] = React.useState(false);
-  const [status, setStatus] = React.useState<string | null>(null);
-  const [results, setResults] = React.useState<string[]>([]);
-  const [promptPreview, setPromptPreview] = React.useState<string | null>(null);
+  const [stage, setStage] = React.useState<string | null>(null);
+  const [status, setStatus] = React.useState<{ kind: "ok" | "err"; text: string; hint?: string } | null>(null);
+  const [promptDraft, setPromptDraft] = React.useState<string | null>(null);
+  const [keyCheck, setKeyCheck] = React.useState<string | null>(null);
+  const [checking, setChecking] = React.useState(false);
+  const [advanced, setAdvanced] = React.useState(false);
+  const [hovered, setHovered] = React.useState<string | null>(null);
 
-  const providerId = String(v.accentProvider ?? "ark-seedream");
+  const providerId = String(v.accentProvider ?? "dashscope-wanx");
   const keyMode = String(v.accentKeyMode ?? "env");
   const current = providers?.find((p) => p.id === providerId) ?? null;
   const isCustom = providerId === "custom";
+
+  // Results live in settings, not in component state: leaving this page used to throw the wall away
+  // (and the files it pointed at were then collected as orphans).
+  const frames: FrameRecord[] = React.useMemo(() => {
+    try {
+      const parsed = JSON.parse(String(v.accentFrames ?? "[]"));
+      return Array.isArray(parsed) ? (parsed as FrameRecord[]).slice(0, 24) : [];
+    } catch {
+      return [];
+    }
+  }, [v.accentFrames]);
+  const writeFrames = (next: FrameRecord[]) => props.onSet("accentFrames", JSON.stringify(next.slice(0, 24)));
 
   React.useEffect(() => {
     let alive = true;
@@ -2268,19 +2381,26 @@ function AiAccentPanel(props: {
     };
   }, []);
 
-  const promptBody = () => ({
-    strength: props.strength,
-    style: String(v.accentStyle ?? ""),
-    palette: String(v.accentPalette ?? "").split("|").map((s) => s.trim()).filter(Boolean),
-    material: String(v.accentMaterial ?? ""),
-    extra: String(v.accentPromptExtra ?? ""),
+  const keyPayload = () => ({
+    providerId,
+    baseUrl: String(v.accentBaseUrl ?? ""),
+    model: String(v.accentModel ?? ""),
+    apiKey: keyMode === "manual" ? String(v.accentApiKey ?? "") : "",
+    apiKeyEnv: String(v.accentKeyEnv ?? ""),
   });
 
+  const [autoPrompt, setAutoPrompt] = React.useState<string | null>(null);
   const fetchPrompt = async (): Promise<string> => {
     const res = await fetch(`${ROUTE_PREFIX}/prompt`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify(promptBody()),
+      body: JSON.stringify({
+        strength: props.strength,
+        style: String(v.accentStyle ?? ""),
+        palette: String(v.accentPalette ?? "").split("|").map((s) => s.trim()).filter(Boolean),
+        material: String(v.accentMaterial ?? ""),
+        extra: String(v.accentPromptExtra ?? ""),
+      }),
     });
     const data = await res.json();
     return String(data?.prompt ?? "");
@@ -2288,44 +2408,114 @@ function AiAccentPanel(props: {
 
   const preview = async () => {
     try {
-      setPromptPreview(await fetchPrompt());
+      const text = await fetchPrompt();
+      setAutoPrompt(text);
+      setPromptDraft((draft) => draft ?? text);
+      setStatus({ kind: "ok", text: "提示词已按当前设定拼好，你可以直接改。" });
     } catch (error) {
-      setPromptPreview(`无法获取：${String(error)}`);
+      setStatus({ kind: "err", text: `取不到提示词：${String(error)}` });
     }
+  };
+
+  const probeKey = async () => {
+    setChecking(true);
+    setKeyCheck("检查中…");
+    try {
+      const res = await fetch(`${ROUTE_PREFIX}/test`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(keyPayload()),
+      });
+      const data = await res.json();
+      setKeyCheck(`${data?.ok ? "✅" : "⚠️"} ${String(data?.detail ?? "")}${data?.hint ? `（${data.hint}）` : ""}`);
+    } catch (error) {
+      setKeyCheck(`⚠️ 检查失败：${String(error)}`);
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const stageText: Record<string, string> = {
+    submitted: "已提交给服务商…",
+    queued: "排队中（阿里云常要 1–2 分钟）…",
+    running: "正在生成…",
+    saving: "正在存图…",
   };
 
   const generate = async () => {
     setBusy(true);
-    setStatus("生成中…（通常 10–90 秒；阿里云排队时可能 1–2 分钟）");
-    setResults([]);
+    setStatus(null);
+    setStage("submitted");
     try {
-      const prompt = await fetchPrompt();
-      const res = await fetch(`${ROUTE_PREFIX}/gen`, {
+      const prompt = promptDraft ?? (await fetchPrompt());
+      const payload = {
+        ...keyPayload(),
+        prompt,
+        count: Number(v.accentCount ?? 2),
+        size: String(v.accentSize ?? "1024x1024"),
+      };
+      // Prefer the streaming route so the stages are real; fall back to the plain one if a DSH
+      // version does not have it.
+      let urls: string[] = [];
+      let failure: { error?: string; hint?: string; detail?: string } | null = null;
+      const res = await fetch(`${ROUTE_PREFIX}/gen/stream`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          providerId,
-          baseUrl: String(v.accentBaseUrl ?? ""),
-          model: String(v.accentModel ?? ""),
-          apiKey: keyMode === "manual" ? String(v.accentApiKey ?? "") : "",
-          apiKeyEnv: String(v.accentKeyEnv ?? ""),
-          prompt,
-          count: Number(v.accentCount ?? 1),
-          size: String(v.accentSize ?? "1024x1024"),
-        }),
+        body: JSON.stringify(payload),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setStatus(`失败：${String(data?.error ?? res.status)}`);
+      if (res.ok && res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+          for (const part of parts) {
+            const line = part.replace(/^data:\s*/m, "").trim();
+            if (!line) continue;
+            try {
+              const event = JSON.parse(line) as Record<string, unknown>;
+              if (typeof event.stage === "string" && event.stage !== "done") setStage(event.stage);
+              if (event.stage === "done") {
+                urls = Array.isArray(event.urls) ? (event.urls as string[]) : [];
+                if (!urls.length) failure = { error: String(event.error ?? "生成失败"), hint: event.hint ? String(event.hint) : undefined, detail: event.detail ? String(event.detail) : undefined };
+              }
+            } catch {
+              /* keep-alive or half a frame; ignore */
+            }
+          }
+        }
+      } else {
+        const plain = await fetch(`${ROUTE_PREFIX}/gen`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const data = await plain.json();
+        urls = Array.isArray(data?.urls) ? data.urls : [];
+        if (!urls.length) failure = { error: String(data?.error ?? data?.status ?? "生成失败"), hint: data?.hint, detail: data?.detail };
+      }
+      if (!urls.length) {
+        setStatus({ kind: "err", text: failure?.error ?? "生成失败", hint: failure?.hint ?? failure?.detail });
         return;
       }
-      const urls: string[] = Array.isArray(data?.urls) ? data.urls : [];
-      setResults(urls);
-      setStatus(urls.length ? `生成完成 ${urls.length} 张 —— 点一下就用它作装饰框` : "没有返回图片");
+      const record: FrameRecord[] = urls.map((url) => ({
+        url,
+        prompt,
+        provider: providerId,
+        model: String(current?.model ?? v.accentModel ?? ""),
+        at: Date.now(),
+      }));
+      writeFrames([...record, ...frames]);
+      setStatus({ kind: "ok", text: `生成完成 ${urls.length} 张 —— 点缩略图就应用到面板` });
     } catch (error) {
-      setStatus(`失败：${String(error)}`);
+      setStatus({ kind: "err", text: `生成失败：${String(error)}` });
     } finally {
       setBusy(false);
+      setStage(null);
     }
   };
 
@@ -2341,12 +2531,13 @@ function AiAccentPanel(props: {
     h("input", {
       className: "dshImgSkin-input",
       value: String(v[fieldName] ?? ""),
-      onChange: (e: any) => props.onSet(fieldName, e.target.value),
       ...opts,
+      onChange: (e: any) => props.onSet(fieldName, e.target.value),
     });
 
-  const envReady = Boolean(current?.envReady);
   const envName = String(current?.keyEnv ?? "");
+  const envReady = Boolean(current?.envReady);
+  const applied = String(v.accentFrame ?? "");
 
   return h(
     "div",
@@ -2357,50 +2548,64 @@ function AiAccentPanel(props: {
       h(
         "div",
         null,
-        h("span", { className: "dshImgSkin-title" }, "AI 纹样（生成装饰）"),
-        h("p", { className: "dshImgSkin-sub" }, "用绘图模型生成真正的花纹，用作按钮与弹窗的装饰框；只生成纹样，不含内容。"),
+        h("span", { className: "dshImgSkin-title" }, "生成装饰框"),
+        h(
+          "p",
+          { className: "dshImgSkin-sub" },
+          "让生图模型画一张边框花纹。提示词里已经写死了「不要文字 / 人 / 景 / 物」，配色和材质来自你的壁纸。",
+        ),
       ),
-      h("button", { className: "dshImgSkin-btn", type: "button", onClick: () => void preview() }, "预览提示词"),
     ),
 
+    // 1) who draws it
     field(
-      "prov",
+      "provider",
       "服务商",
       h(
-        "select",
-        {
-          className: "dshImgSkin-input",
-          value: providerId,
-          onChange: (e: any) => props.onSet("accentProvider", e.target.value),
-        },
-        (providers ?? []).map((p) => h("option", { key: String(p.id), value: String(p.id) }, String(p.label))),
+        "div",
+        { className: "dshImgSkin-inline" },
+        h(
+          "select",
+          {
+            className: "dshImgSkin-input",
+            value: providerId,
+            onChange: (e: any) => {
+              props.onSet("accentProvider", e.target.value);
+              setKeyCheck(null);
+            },
+          },
+          (providers ?? []).map((p) => h("option", { key: String(p.id), value: String(p.id) }, String(p.label))),
+        ),
+        h(
+          "button",
+          { className: "dshImgSkin-btn", type: "button", disabled: checking, onClick: () => void probeKey() },
+          checking ? "检查中…" : "检查",
+        ),
       ),
-      current ? (isCustom ? "自定义：下面填 Base URL 与模型 ID" : `默认模型 ${String(current.model)}`) : "加载中…",
+      isCustom ? "自定义：下面填 Base URL 与模型 ID" : `默认模型 ${String(current?.model ?? "")}`,
     ),
-
+    keyCheck ? h("p", { className: "dshImgSkin-ok" }, keyCheck) : null,
     isCustom ? field("base", "Base URL", textInput("accentBaseUrl", { placeholder: "https://your-endpoint/v1" })) : null,
-    // The model is an override for presets too: 通义万相 has turbo / plus / 2.2 and qwen-image
-    // variants, and "switch to 自定义 and retype everything" is a silly way to try another one.
     field(
       "model",
       "模型 ID",
       textInput("accentModel", { placeholder: current?.model ? String(current.model) : "your-model-id" }),
       isCustom ? undefined : "留空则用该服务商的默认模型",
     ),
-
     field(
       "keysrc",
       "API Key",
       h(
         "div",
-        { className: "dshImgSkin-seg" },
-        (["env", "manual"] as const).map((m) =>
+        { className: "dshImgSkin-inline" },
+        ...(["env", "manual"] as const).map((m) =>
           h(
             "button",
             {
               key: m,
               type: "button",
-              "data-on": String(keyMode === m),
+              className: "dshImgSkin-btn",
+              "data-active": String(keyMode === m),
               onClick: () => props.onSet("accentKeyMode", m),
             },
             m === "env" ? "环境变量" : "手动输入",
@@ -2413,89 +2618,181 @@ function AiAccentPanel(props: {
           : `未检测到 ${envName || "对应环境变量"}；可切到手动输入`
         : "Key 存本机设置文件，不会上传；但仍请注意本机安全",
     ),
-
     keyMode === "env"
-      ? field(
-          "envname",
-          "变量名",
-          textInput("accentKeyEnv", { placeholder: envName || "ARK_API_KEY", disabled: Boolean(envName) }),
-          "留空则用该服务商的默认变量名",
-        )
+      ? field("envname", "变量名", textInput("accentKeyEnv", { placeholder: envName || "ARK_API_KEY", disabled: Boolean(envName) }), "留空则用该服务商的默认变量名")
       : field("key", "Key", textInput("accentApiKey", { type: "password", placeholder: "sk-..." })),
 
+    // 2) what to ask for
     field(
-      "count",
-      "张数 / 尺寸",
+      "style",
+      "风格",
       h(
         "div",
         { className: "dshImgSkin-inline" },
-        h("input", {
-          className: "dshImgSkin-input dshImgSkin-inputNarrow",
-          type: "number",
-          min: 1,
-          max: 4,
-          value: String(v.accentCount ?? 1),
-          onChange: (e: any) => props.onSet("accentCount", Number(e.target.value)),
-        }),
-        h("span", { className: "dshImgSkin-hint" }, "张（1-4）"),
-        h(
-          "select",
-          {
-            className: "dshImgSkin-input dshImgSkin-inputNarrow",
-            value: String(v.accentSize ?? "1024x1024"),
-            onChange: (e: any) => props.onSet("accentSize", e.target.value),
-          },
-          ["1024x1024", "1280x720", "720x1280"].map((s) => h("option", { key: s, value: s }, s)),
+        ...STYLE_PRESETS.map((preset) =>
+          h(
+            "button",
+            {
+              key: preset.name,
+              type: "button",
+              className: "dshImgSkin-btn",
+              "data-variant": "quiet",
+              onClick: () => {
+                props.onSet("accentStyle", preset.text);
+                setPromptDraft(null);
+                setAutoPrompt(null);
+              },
+            },
+            preset.name,
+          ),
         ),
       ),
+      String(v.accentStyle ?? "") ? `当前：${String(v.accentStyle)}` : "点一个词就填进去；也可以留空让模型自由发挥",
     ),
-
-    field("style", "风格（可选）", textInput("accentStyle", { placeholder: "art nouveau / 赛博霓虹 / 水墨 …" })),
-
-    promptPreview ? h("div", { className: "dshImgSkin-promptBox" }, promptPreview) : null,
-    status ? h("p", { className: "dshImgSkin-ok" }, status) : null,
-
+    field(
+      "prompt",
+      "提示词",
+      h("textarea", {
+        className: "dshImgSkin-input dshImgSkin-textarea",
+        rows: 4,
+        value: promptDraft ?? autoPrompt ?? "",
+        placeholder: "点「取提示词」按当前设定拼一份，然后你随便改",
+        onChange: (e: any) => setPromptDraft(e.target.value),
+      }),
+      promptDraft && autoPrompt && promptDraft !== autoPrompt ? "已手改（生成用你改的这份）" : undefined,
+    ),
     h(
       "div",
-      { className: "dshImgSkin-ops" },
+      { className: "dshImgSkin-inline" },
+      h("button", { className: "dshImgSkin-btn", type: "button", onClick: () => void preview() }, "取提示词"),
       h(
         "button",
         {
           className: "dshImgSkin-btn",
           type: "button",
-          "data-variant": "primary",
-          disabled: busy,
-          onClick: () => void generate(),
+          "data-variant": "quiet",
+          onClick: () => {
+            setPromptDraft(null);
+            setAutoPrompt(null);
+            setStatus(null);
+          },
         },
-        busy ? "生成中…" : "生成装饰",
+        "重置为自动",
       ),
+      h(
+        "span",
+        { className: "dshImgSkin-fitlabel" },
+        `${Number(v.accentCount ?? 2)} 张`,
+      ),
+      h("input", {
+        className: "dshImgSkin-input dshImgSkin-inputNarrow",
+        type: "number",
+        min: 1,
+        max: 4,
+        value: String(v.accentCount ?? 2),
+        onChange: (e: any) => props.onSet("accentCount", Number(e.target.value)),
+      }),
     ),
 
-    results.length
+    // 3) advanced
+    h(
+      "div",
+      { className: "dshImgSkin-inline" },
+      h(
+        "button",
+        { className: "dshImgSkin-btn", type: "button", "data-variant": "quiet", onClick: () => setAdvanced((a) => !a) },
+        advanced ? "收起高级 ▴" : "高级 ▾",
+      ),
+    ),
+    advanced
+      ? field(
+          "size",
+          "尺寸",
+          h(
+            "select",
+            {
+              className: "dshImgSkin-input dshImgSkin-inputNarrow",
+              value: String(v.accentSize ?? "1024x1024"),
+              onChange: (e: any) => props.onSet("accentSize", e.target.value),
+            },
+            ["1024x1024", "1280x720", "720x1280"].map((s) => h("option", { key: s, value: s }, s)),
+          ),
+          "边框是九宫格贴上去的，尺寸影响不大，默认就行",
+        )
+      : null,
+
+    // 4) go
+    h(
+      "div",
+      { className: "dshImgSkin-inline" },
+      h(
+        "button",
+        { className: "dshImgSkin-btn", type: "button", "data-variant": "primary", disabled: busy, onClick: () => void generate() },
+        busy ? "生成中…" : "生成装饰",
+      ),
+      busy && stage ? h("span", { className: "dshImgSkin-hint" }, stageText[stage] ?? stage) : null,
+      h("span", { className: "dshImgSkin-hint" }, `本次会话已生成 ${frames.length} 张（会产生费用）`),
+    ),
+    status
+      ? h(
+          "p",
+          { className: status.kind === "ok" ? "dshImgSkin-ok" : "dshImgSkin-banner" },
+          status.text,
+          status.hint ? h("span", { className: "dshImgSkin-hint" }, ` ${status.hint}`) : null,
+        )
+      : null,
+
+    // 5) results
+    frames.length
       ? h(
           "div",
-          { className: "dshImgSkin-results" },
-          results.map((url, i) =>
-            h(
-              "button",
-              {
-                key: `${url}-${i}`,
-                type: "button",
-                className: "dshImgSkin-result",
-                "data-on": String(String(v.accentFrame ?? "") === url),
-                // Clicking the applied one takes it off again: there was no way back from an
-                // applied frame before, and "点一下应用" reads as a toggle in every other picker.
-                title: String(v.accentFrame ?? "") === url ? "再点一下取消应用" : "点击应用这张",
-                onClick: () => props.onSet("accentFrame", String(v.accentFrame ?? "") === url ? "" : url),
-              },
-              h("img", { src: url, alt: "" }),
+          null,
+          h(
+            "div",
+            { className: "dshImgSkin-results" },
+            ...frames.map((frame) =>
+              h(
+                "div",
+                { key: frame.url, className: "dshImgSkin-frameCell", onMouseEnter: () => setHovered(frame.url), onMouseLeave: () => setHovered(null) },
+                h(
+                  "button",
+                  {
+                    type: "button",
+                    className: "dshImgSkin-result",
+                    "data-on": String(applied === frame.url),
+                    title: applied === frame.url ? "再点一下取消应用" : "点击应用这张",
+                    onClick: () => props.onSet("accentFrame", applied === frame.url ? "" : frame.url),
+                  },
+                  h("img", { src: frame.url, alt: "" }),
+                ),
+                h(
+                  "div",
+                  { className: "dshImgSkin-inline dshImgSkin-frameOps" },
+                  h("a", { className: "dshImgSkin-btn", "data-variant": "quiet", href: frame.url, download: "" }, "下载"),
+                  h(
+                    "button",
+                    {
+                      className: "dshImgSkin-btn",
+                      type: "button",
+                      "data-variant": "quiet",
+                      onClick: () => {
+                        if (applied === frame.url) props.onSet("accentFrame", "");
+                        writeFrames(frames.filter((f) => f.url !== frame.url));
+                      },
+                    },
+                    "删除",
+                  ),
+                ),
+              ),
             ),
           ),
+          hovered && frames.find((f) => f.url === hovered)
+            ? h("p", { className: "dshImgSkin-hint" }, `这张的提示词：${frames.find((f) => f.url === hovered)?.prompt ?? ""}`)
+            : h("p", { className: "dshImgSkin-hint" }, "点缩略图应用；按一下已应用的那张就能取消。结果会保存，离开也不会丢。"),
         )
       : null,
   );
 }
-
 
 function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => React.ReactElement {
   const h = React.createElement;
@@ -2669,6 +2966,15 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       .split("|")
       .map((s) => s.trim())
       .filter(Boolean);
+    /** Friendly names for the material read (see MATERIALS in the host half). */
+    const MATERIAL_LABELS: Record<string, string> = {
+      sky: "天空 / 天光",
+      paper: "纸 / 和纸",
+      wood: "木",
+      water: "水 / 波纹",
+      neon: "霓虹 / 高饱和",
+      plain: "（未识别）",
+    };
     const aiStatus =
       v.accentEnabled === false
         ? "装饰未开启"
@@ -2953,8 +3259,96 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
                 ...sampledColours.map((c, i) =>
                   h("span", { key: `s${i}`, className: "dshImgSkin-swatch", style: { background: `rgb(${c})` }, title: c }),
                 ),
+                String(v.accentMaterial ?? "") && String(v.accentMaterial) !== "plain"
+                  ? h("span", { className: "dshImgSkin-fitlabel" }, `· 读到的材质：${MATERIAL_LABELS[String(v.accentMaterial)] ?? String(v.accentMaterial)}`)
+                  : null,
               ),
-              h("span", { className: "dshImgSkin-hint" }, "装饰配色由这几种色归纳成一个主色，再按角色分配；偏白的色也留着，做高光和分隔线"),
+              h("span", { className: "dshImgSkin-hint" }, "档位只决定本机画多少；生成的花纹在下面单独应用"),
+            )
+          : null,
+      ),
+      // ② 已应用的装饰框：生成物和档位解耦，这里给它自己的开关和三个旋钮。
+      h(
+        "div",
+        { className: "dshImgSkin-card" },
+        h(
+          "div",
+          { className: "dshImgSkin-cardhead" },
+          h(
+            "div",
+            null,
+            h("span", { className: "dshImgSkin-title" }, "已应用的装饰框"),
+            h(
+              "p",
+              { className: "dshImgSkin-sub" },
+              String(v.accentFrame ?? "")
+                ? "来自生图结果，套在面板与弹窗上。粗细/浓淡随时可调。"
+                : "还没选生成框。下面生成一张，点它一下就会套上来。",
+            ),
+          ),
+          String(v.accentFrame ?? "")
+            ? h(
+                "button",
+                { className: "dshImgSkin-btn", type: "button", onClick: () => apply("accentFrame", "") },
+                "取消应用",
+              )
+            : null,
+        ),
+        String(v.accentFrame ?? "")
+          ? h(
+              "div",
+              { className: "dshImgSkin-inline" },
+              h("img", { className: "dshImgSkin-framePreview", src: String(v.accentFrame), alt: "" }),
+              h(
+                "div",
+                { className: "dshImgSkin-frameKnobs" },
+                h(SliderRow, {
+                  key: "fw",
+                  title: "粗细",
+                  hint: "模型不知道你的面板多大，偏粗就往下拉",
+                  value: Number(v.accentFrameScale ?? 1),
+                  min: 0.6,
+                  max: 1.6,
+                  step: 0.1,
+                  format: (n: number) => `${n.toFixed(1)}×`,
+                  onPreview: (n: number) => reapplyWith?.({ accentFrameScale: n }),
+                  onCommit: (n: number) => apply("accentFrameScale", n),
+                }),
+                h(SliderRow, {
+                  key: "fo",
+                  title: "浓淡",
+                  hint: "花纹太重会压住面板里的字",
+                  value: Number(v.accentFrameOpacity ?? 1),
+                  min: 0.3,
+                  max: 1,
+                  step: 0.05,
+                  format: (n: number) => `${Math.round(n * 100)}%`,
+                  onPreview: (n: number) => reapplyWith?.({ accentFrameOpacity: n }),
+                  onCommit: (n: number) => apply("accentFrameOpacity", n),
+                }),
+                h(
+                  "label",
+                  { className: "dshImgSkin-switch" },
+                  h("input", {
+                    type: "checkbox",
+                    checked: v.accentFrameControls === true,
+                    onChange: (e: any) => apply("accentFrameControls", e.target.checked),
+                  }),
+                  "也用在按钮/输入框上",
+                ),
+              ),
+            )
+          : null,
+        Number(v.accentLevel ?? 0) === 0 && String(v.accentFrame ?? "")
+          ? h(
+              "p",
+              { className: "dshImgSkin-hint" },
+              "档位是 0（只取色）——要看到装饰框得把档位调到 1 以上：",
+              h(
+                "button",
+                { className: "dshImgSkin-btn", type: "button", "data-variant": "quiet", onClick: () => apply("accentLevel", 1) },
+                "调到 1",
+              ),
             )
           : null,
       ),
@@ -3026,6 +3420,10 @@ export function apply(ctx: ClientContext): void {
   refreshAccent = () => {
     const snapshot = scope.getSnapshot();
     if (snapshot.value) void applyAccent(snapshot.value, modeStore.get(), commit);
+  };
+  reapplyWith = (patch) => {
+    const snapshot = scope.getSnapshot();
+    if (snapshot.value) void applyAccent({ ...snapshot.value, ...patch }, modeStore.get());
   };
   readSkinValue = () => scope.getSnapshot().value;
   readSkinMode = () => modeStore.get();
@@ -3099,6 +3497,7 @@ export function apply(ctx: ClientContext): void {
         readSkinValue = null;
         readSkinMode = null;
         reapply = null;
+        reapplyWith = null;
         refreshAccent = null;
         disposeSkinDom();
         document.body.removeAttribute(BODY_ATTR);

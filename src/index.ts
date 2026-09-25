@@ -203,10 +203,11 @@ async function callProvider(
   provider: ProviderDef,
   key: string,
   body: { prompt: string; count: number; size: string },
+  stage?: (s: string) => void,
 ): Promise<{ ok: true; images: string[] } | { ok: false; error: string }> {
   const url = `${provider.baseUrl.replace(/\/+$/, "")}/images/generations`;
   // DashScope is its own protocol (submit + poll); everything else here is OpenAI-shaped.
-  if (provider.kind === "dashscope") return callDashscope(provider, key, body);
+  if (provider.kind === "dashscope") return callDashscope(provider, key, body, stage);
   const payload = provider.kind === "ark"
     ? { model: provider.model, prompt: body.prompt, size: body.size, response_format: "url", watermark: false }
     : { model: provider.model, prompt: body.prompt, n: body.count, size: body.size, response_format: "url" };
@@ -256,6 +257,7 @@ async function callDashscope(
   provider: ProviderDef,
   key: string,
   body: { prompt: string; count: number; size: string },
+  stage?: (s: string) => void,
 ): Promise<{ ok: true; images: string[] } | { ok: false; error: string }> {
   const base = provider.baseUrl.replace(/\/+$/, "");
   let submitted: Response;
@@ -296,6 +298,7 @@ async function callDashscope(
   // open forever.
   for (let attempt = 0; attempt < 60; attempt++) {
     await sleep(2_500);
+    stage?.(attempt === 0 ? "queued" : "running");
     let poll: Response;
     try {
       poll = await fetch(`${base}/tasks/${taskId}`, {
@@ -346,6 +349,98 @@ function collectDashscopeImages(payload: any): string[] {
     }
   }
   return out;
+}
+
+/** Turn a provider failure into something a human can act on. */
+function describeFailure(provider: ProviderDef, detail: string): { error: string; hint: string; retryable: boolean } {
+  const status = Number(/返回 (\d{3})/.exec(detail)?.[1] ?? NaN);
+  if (status === 401 || /invalid.?api.?key|unauthor/i.test(detail)) {
+    return { error: "Key 没通过验证（401）", hint: "回头检查一下 Key：是不是复制少了字符，或已经过期。", retryable: false };
+  }
+  if (status === 403) {
+    return { error: "这个 Key 没有权限（403）", hint: `要么没开通 ${provider.model} 这个模型，要么账号被限制。`, retryable: false };
+  }
+  if (status === 404) {
+    return { error: "地址或模型不对（404）", hint: "检查「模型 ID」和 Base URL：多数 404 都是这两个填错。", retryable: false };
+  }
+  if (status === 429) {
+    return { error: "被限流了（429）", hint: "等一两分钟再试，或降低张数。", retryable: true };
+  }
+  if (status >= 500) {
+    return { error: `服务端故障（${status}）`, hint: "不是你的问题，稍后重试。", retryable: true };
+  }
+  if (/超时|timeout|排队/i.test(detail)) {
+    return { error: "还没等到结果", hint: "服务在排队；稍后再试一次，或换极速版模型。", retryable: true };
+  }
+  if (/ECONNREFUSED|ENOTFOUND|fetch failed|连不上/i.test(detail)) {
+    return { error: "连不上这个服务", hint: "Base URL 写错了？或者本机网络/代理拦住了。", retryable: true };
+  }
+  return { error: "生成失败", hint: "下面的原文里通常有线索；改完再试一次。", retryable: true };
+}
+
+/** Cheap key probe: does the service accept this key at all? (No image is requested.) */
+async function testKey(provider: ProviderDef, key: string): Promise<{ ok: boolean; detail: string }> {
+  const base = provider.baseUrl.replace(/\/+$/, "");
+  try {
+    if (provider.kind === "dashscope") {
+      const res = await fetch(`${base}/tasks/dsh-image-skin-probe`, {
+        headers: { authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (res.status === 401 || res.status === 403) return { ok: false, detail: "服务返回 401/403：Key 不对、或没开通这项服务" };
+      return { ok: true, detail: `服务应答 ${res.status}，Key 被接受` };
+    }
+    const res = await fetch(`${base}/models`, { headers: { authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(15_000) });
+    if (res.status === 401 || res.status === 403) return { ok: false, detail: "服务返回 401/403：Key 不对或已过期" };
+    if (!res.ok) return { ok: true, detail: `服务应答 ${res.status}（这个服务不支持预检，直接生成时才知道）` };
+    return { ok: true, detail: "Key 可用" };
+  } catch (error) {
+    return { ok: false, detail: `连不上：${(error as Error).message}` };
+  }
+}
+
+interface GenOutcome {
+  status: number;
+  body: Record<string, unknown>;
+}
+
+/**
+ * The whole generation flow (validate → call → store), shared by the plain route and the
+ * streaming one. `stage` lets a caller report progress while a slow job is running.
+ */
+async function runGeneration(payload: GenRequest, stage?: (s: string) => void): Promise<GenOutcome> {
+  if (!payload?.prompt || typeof payload.prompt !== "string") return { status: 400, body: { error: "缺少提示词" } };
+  const provider = resolveProvider(payload);
+  if (!provider) return { status: 400, body: { error: "未知的服务商，或自定义服务商缺少 Base URL / 模型 ID" } };
+  const { key, from } = resolveKey(payload, provider);
+  if (!key) {
+    return {
+      status: 400,
+      body: {
+        error: `没有找到 ${provider.label} 的 API Key`,
+        hint: `在上面填入，或设环境变量 ${provider.keyEnv ?? "（自定义）"}。`,
+        retryable: false,
+      },
+    };
+  }
+  const count = Math.max(1, Math.min(4, Math.round(Number(payload.count) || 1)));
+  const size = typeof payload.size === "string" && /^\d{2,4}x\d{2,4}$/.test(payload.size) ? payload.size : "1024x1024";
+  stage?.("submitted");
+  const result = await callProvider(provider, key, { prompt: payload.prompt, count, size }, stage);
+  if ("error" in result) {
+    const friendly = describeFailure(provider, result.error);
+    return { status: 502, body: { ...friendly, detail: result.error, provider: provider.id, keyFrom: from } };
+  }
+  stage?.("saving");
+  const saved: string[] = [];
+  for (const src of result.images) {
+    const stored = await storeImage(src);
+    if (stored) saved.push(stored.url);
+  }
+  if (!saved.length) {
+    return { status: 502, body: { error: "生成成功，但图片存不下来", hint: "服务返回的临时链接可能已过期，再试一次。", retryable: true } };
+  }
+  return { status: 200, body: { urls: saved, provider: provider.id, model: provider.model, keyFrom: from } };
 }
 
 /** Save a remote image or data URI into the skin directory and return its public URL. */
@@ -519,29 +614,57 @@ export function apply(ctx: HostContext): void {
                   if ((error as { code?: string }).code === "E_TOO_LARGE") return ok(413, { error: "请求过大" });
                   throw error;
                 }
-                const payload = JSON.parse(body) as GenRequest;
-                if (!payload?.prompt || typeof payload.prompt !== "string") {
-                  return ok(400, { error: "missing prompt" });
+                const out = await runGeneration(JSON.parse(body) as GenRequest);
+                return ok(out.status, out.body);
+              }
+              // POST /dsh-image-skin/gen/stream — same flow, but reports progress as it goes.
+              // A text-to-image job can queue for minutes; without this the UI could only say
+              // "生成中…" and hope. Half a dozen small events, then the same result body.
+              if (req.method === "POST" && url.pathname === `${ROUTE_PREFIX}/gen/stream`) {
+                let body: string;
+                try {
+                  body = await readBody(req, 256 * 1024);
+                } catch (error) {
+                  if ((error as { code?: string }).code === "E_TOO_LARGE") return ok(413, { error: "请求过大" });
+                  throw error;
                 }
+                res.writeHead(200, {
+                  "content-type": "text/event-stream; charset=utf-8",
+                  "cache-control": "no-store",
+                  connection: "keep-alive",
+                });
+                const send = (obj: unknown) => {
+                  try {
+                    res.write(`data: ${JSON.stringify(obj)}\n\n`);
+                  } catch {
+                    /* client went away; the run finishes and is stored anyway */
+                  }
+                };
+                try {
+                  const out = await runGeneration(JSON.parse(body) as GenRequest, (stageName) => send({ stage: stageName }));
+                  send({ stage: "done", ...out.body, status: out.status });
+                } catch (error) {
+                  send({ stage: "done", status: 500, error: "生成过程中出错了", detail: String(error) });
+                }
+                res.end();
+                return;
+              }
+              // POST /dsh-image-skin/test — check the key without spending a generation.
+              if (req.method === "POST" && url.pathname === `${ROUTE_PREFIX}/test`) {
+                const body = await readBody(req, 32 * 1024);
+                const payload = JSON.parse(body) as GenRequest;
                 const provider = resolveProvider(payload);
-                if (!provider) return ok(400, { error: "未知的服务商，或自定义服务商缺少 Base URL / 模型 ID" });
+                if (!provider) return ok(200, { ok: false, detail: "未知的服务商，或自定义服务商缺少 Base URL / 模型 ID" });
                 const { key, from } = resolveKey(payload, provider);
                 if (!key) {
-                  return ok(400, {
-                    error: `没有找到 ${provider.label} 的 API Key：请在上面填入，或设置环境变量 ${provider.keyEnv ?? "（自定义）"}`,
+                  return ok(200, {
+                    ok: false,
+                    detail: `没有找到 ${provider.label} 的 API Key`,
+                    hint: `填入，或设环境变量 ${provider.keyEnv ?? "（自定义）"}。`,
                   });
                 }
-                const count = Math.max(1, Math.min(4, Math.round(Number(payload.count) || 1)));
-                const size = typeof payload.size === "string" && /^\d{2,4}x\d{2,4}$/.test(payload.size) ? payload.size : "1024x1024";
-                const result = await callProvider(provider, key, { prompt: payload.prompt, count, size });
-                if ("error" in result) return ok(502, { error: result.error, keyFrom: from });
-                const saved: string[] = [];
-                for (const src of result.images) {
-                  const stored = await storeImage(src);
-                  if (stored) saved.push(stored.url);
-                }
-                if (!saved.length) return ok(502, { error: "生成成功但图片保存失败（可能是无法访问的临时链接）" });
-                return ok(200, { urls: saved, provider: provider.id, model: provider.model, keyFrom: from });
+                const check = await testKey(provider, key);
+                return ok(200, { ...check, provider: provider.id, keyFrom: from });
               }
               // POST /dsh-image-skin/prompt — compose the prompt without generating (preview in UI).
               if (req.method === "POST" && url.pathname === `${ROUTE_PREFIX}/prompt`) {

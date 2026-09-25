@@ -65,8 +65,14 @@ function fakeReq(method, url, body, headers = {}) {
   };
 }
 async function call(method, url, body, headers) {
-  const out = { status: 0, headers: null, body: null };
-  const res = { writeHead: (s, h) => ((out.status = s), (out.headers = h)), end: (b) => (out.body = b) };
+  const out = { status: 0, headers: null, body: null, chunks: [] };
+  const res = {
+    writeHead: (s, h) => ((out.status = s), (out.headers = h)),
+    write: (chunk) => (out.chunks.push(String(chunk)), true),
+    end: (b) => {
+      if (b !== undefined) out.body = b;
+    },
+  };
   await route.handler(fakeReq(method, url, body, headers), res);
   return out;
 }
@@ -285,7 +291,12 @@ const okGen = { providerId: "custom", baseUrl: "http://127.0.0.1:9/v1", model: "
 }
 {
   const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ providerId: "ark-seedream", prompt: "x" }));
-  check("preset without an env key -> 400 naming ARK_API_KEY", r.status === 400 && /ARK_API_KEY/.test(json(r)?.error ?? ""), r.body);
+  const body = json(r);
+  check(
+    "preset without an env key -> 400 naming ARK_API_KEY",
+    r.status === 400 && /API Key/.test(body?.error ?? "") && /ARK_API_KEY/.test(body?.hint ?? ""),
+    r.body,
+  );
 }
 {
   // Happy path with a provider that answers with a data URI: nothing else gets fetched.
@@ -338,7 +349,12 @@ const okGen = { providerId: "custom", baseUrl: "http://127.0.0.1:9/v1", model: "
     throw new Error("ECONNREFUSED");
   });
   const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify(okGen));
-  check("unreachable provider -> 502 with the reason", r.status === 502 && /ECONNREFUSED/.test(json(r)?.error ?? ""), r.body);
+  const body = json(r);
+  check(
+    "unreachable provider -> 502, friendly error + raw detail",
+    r.status === 502 && /连不上/.test(body?.error ?? "") && /ECONNREFUSED/.test(body?.detail ?? ""),
+    r.body,
+  );
   globalThis.fetch = realFetch;
 }
 check("global fetch is restored", globalThis.fetch === realFetch);
@@ -385,13 +401,52 @@ console.log("== ai accent: dashscope (submit + poll) ==");
     return new Response(JSON.stringify({ output: { task_status: "FAILED", code: "DataInspectionFailed", message: "blocked" } }), { status: 200 });
   };
   const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ providerId: "dashscope-wanx", apiKey: "k", prompt: "border" }));
-  check("dashscope: a failed task -> 502 quoting the status", r.status === 502 && /FAILED/.test(json(r)?.error ?? ""), r.body);
+  const body = json(r);
+  check("dashscope: a failed task -> 502 quoting the status", r.status === 502 && /FAILED/.test(body?.detail ?? ""), r.body);
+  check("dashscope: a failed task gets a hint too", typeof body?.hint === "string" && body.hint.length > 4, JSON.stringify(body?.hint));
   globalThis.fetch = realFetch;
 }
 {
   globalThis.fetch = async () => new Response(JSON.stringify({ output: { task_status: "PENDING" } }), { status: 200 });
   const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ providerId: "dashscope-wanx", apiKey: "k", prompt: "border" }));
-  check("dashscope: no task id -> 502 naming it", r.status === 502 && /task_id/.test(json(r)?.error ?? ""), r.body);
+  check("dashscope: no task id -> 502 naming it", r.status === 502 && /task_id/.test(json(r)?.detail ?? ""), r.body);
+  globalThis.fetch = realFetch;
+}
+
+console.log("== ai accent: key probe + streaming ==");
+{
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.endsWith("/models")) return new Response(JSON.stringify({ data: [] }), { status: 200 });
+    return new Response("nope", { status: 500 });
+  };
+  const good = json(await call("POST", "/dsh-image-skin/test", JSON.stringify({ providerId: "openai-image", apiKey: "k" })));
+  check("key probe: a good key reports ok", good?.ok === true, JSON.stringify(good));
+  globalThis.fetch = async () => new Response("denied", { status: 401 });
+  const bad = json(await call("POST", "/dsh-image-skin/test", JSON.stringify({ providerId: "openai-image", apiKey: "k" })));
+  check("key probe: a bad key is reported as such", bad?.ok === false && /401/.test(bad?.detail ?? ""), JSON.stringify(bad));
+  const none = json(await call("POST", "/dsh-image-skin/test", JSON.stringify({ providerId: "openai-image" })));
+  check("key probe: no key -> ok:false with a hint", none?.ok === false && /API Key/.test(none?.detail ?? ""), JSON.stringify(none));
+  globalThis.fetch = realFetch;
+}
+{
+  // The streaming route reports stages, then the same body the plain route would return.
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.endsWith("/services/aigc/text2image/image-synthesis")) {
+      return new Response(JSON.stringify({ output: { task_id: "s-1", task_status: "PENDING" } }), { status: 200 });
+    }
+    if (u.endsWith("/tasks/s-1")) {
+      return new Response(JSON.stringify({ output: { task_id: "s-1", task_status: "SUCCEEDED", results: [{ url: "http://127.0.0.1:9/o.png" }] } }), { status: 200 });
+    }
+    return new Response(Buffer.from(PNG, "base64"), { status: 200, headers: { "content-type": "image/png" } });
+  };
+  const r = await call("POST", "/dsh-image-skin/gen/stream", JSON.stringify({ providerId: "dashscope-wanx", apiKey: "k", prompt: "border" }));
+  const joined = (r.chunks ?? []).join("");
+  check("stream: answers with an event stream", /text\/event-stream/.test(String(r.headers?.["content-type"])), String(r.headers?.["content-type"]));
+  check("stream: reports the submit stage", joined.includes('"stage":"submitted"'), joined.slice(0, 200));
+  check("stream: reports the queued/running stage", /"stage":"(queued|running)"/.test(joined), joined.slice(0, 300));
+  check("stream: ends with done + urls", /"stage":"done"/.test(joined) && /\/dsh-image-skin\/files\//.test(joined), joined.slice(-220));
   globalThis.fetch = realFetch;
 }
 
