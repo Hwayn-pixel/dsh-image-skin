@@ -241,13 +241,17 @@ console.log("== ai accent: prompt ==");
   const r = await call(
     "POST",
     "/dsh-image-skin/prompt",
-    JSON.stringify({ style: "rococo", palette: ["17, 34, 51", "170, 187, 204"], strength: 3 }),
+    JSON.stringify({ style: "rococo", palette: ["17, 34, 51", "170, 187, 204"], strength: 3, material: "sky" }),
   );
   const p = json(r)?.prompt ?? "";
   check("POST /prompt -> 200", r.status === 200, `got ${r.status}`);
   check("prompt carries the palette rgb triplets", p.includes("17, 34, 51") && p.includes("170, 187, 204"), p.slice(0, 140));
   check("prompt forbids text and figures", /no text/.test(p) && /no animals/.test(p), p.slice(-180));
   check("prompt mentions the requested style", /rococo/i.test(p), p.slice(-180));
+  // 借材: the material read off the artwork decides what the ornament is made of.
+  check("prompt names the borrowed material", /material: fine silver filigree/.test(p), p.slice(-200));
+  const noMaterial = json(await call("POST", "/dsh-image-skin/prompt", JSON.stringify({ style: "x", palette: [], strength: 2 })))?.prompt ?? "";
+  check("an unknown/absent material adds no line", !/material:/.test(noMaterial), noMaterial.slice(-160));
 }
 
 console.log("== ai accent: gen ==");

@@ -673,6 +673,29 @@ function applyPanelOpacity(value: SkinValue, mode: Mode): void {
 const ACCENT_STYLE_ID = "dsh-image-skin-accent";
 const ACCENT_ATTR = "data-dsh-skin-accent";
 const ACCENT_MARK = "data-dsh-accent";
+/** Stamped per element: 1 = the picture is busy under this element, so decoration yields. */
+const BUSY_ATTR = "data-dsh-skin-busy";
+/** The first hue we saw for the current wallpaper; the breathing pass stays near it. */
+let breathSeed: { url: string; hue: number | null } | null = null;
+
+/** The hue the scheme would pick for a palette ("best usable colour"), or null if there is none. */
+function seedHueOf(palette: string[]): number | null {
+  const ranked = palette
+    .slice(0, 6)
+    .map((p) => {
+      const { r, g, b } = parseTriple(p);
+      const c = rgbToHsl(r, g, b);
+      return { ...c, rank: c.s < 0.12 ? 0 : c.s * Math.max(0, 1 - Math.abs(c.l - 0.55) * 1.5) };
+    })
+    .sort((a, b) => b.rank - a.rank);
+  const best = ranked[0];
+  return best && best.rank > 0.04 ? best.h : null;
+}
+
+function hueDistance(a: number, b: number): number {
+  const d = Math.abs(((a - b) % 360 + 360) % 360);
+  return d > 180 ? 360 - d : d;
+}
 
 interface AccentLevelDef {
   name: string;
@@ -719,19 +742,35 @@ const paletteCache = new Map<string, string[]>();
 let paletteWriteKey: string | null = null;
 let accentTargets: HTMLElement[] = [];
 
+/** Everything we read off the artwork in one pass: palette, light, busyness, material. */
+interface ArtworkReading {
+  palette: string[];
+  /** Which of the 3×3 cells is brightest (-1..1 each), and how warm that cell is. */
+  light: { dirX: number; dirY: number; warmth: number; brightness: number };
+  /** 8×5 grid of local contrast (0..1), so decoration can keep off the busy parts. */
+  density: { busy: number; lum: number }[];
+  /** A rough read of *what the picture is made of*, used to pick ornament material. */
+  material: "sky" | "paper" | "wood" | "water" | "neon" | "plain";
+}
+
+const artworkCache = new Map<string, ArtworkReading>();
+
 /**
- * Reduce an image to a handful of representative colours. A 4-bit bucket histogram over a
- * 64px-wide sampling is plenty for tinting chrome and costs a few milliseconds.
+ * Read the artwork once and keep the result. A video backdrop is re-read on demand (see the
+ * breathing pass in applyAccent) because its frames move.
  */
-async function extractPalette(url: string): Promise<string[]> {
-  const cached = paletteCache.get(url);
-  if (cached) return cached;
+async function sampleArtwork(url: string, refresh = false): Promise<ArtworkReading | null> {
+  if (!refresh) {
+    const hit = artworkCache.get(url);
+    if (hit) return hit;
+  }
   const w = 64;
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  if (!ctx) return [];
-  // A video backdrop never decodes into an <img>, so sample a real frame instead. Without this
-  // the accent silently did nothing at all for anyone using a video wallpaper.
+  if (!ctx) return null;
+
+  // A video backdrop never decodes into an <img>, so sample a real frame instead. Without this the
+  // accent silently did nothing at all for anyone using a video wallpaper.
   if (VIDEO_RE.test(url)) {
     const video = document.createElement("video");
     video.muted = true;
@@ -751,7 +790,7 @@ async function extractPalette(url: string): Promise<string[]> {
         video.currentTime = Math.min(0.5, (Number.isFinite(video.duration) ? video.duration : 1) * 0.1);
       });
     } catch {
-      return [];
+      return null;
     }
     const h = Math.max(1, Math.round((w * video.videoHeight) / Math.max(1, video.videoWidth)));
     canvas.width = w;
@@ -764,19 +803,28 @@ async function extractPalette(url: string): Promise<string[]> {
     try {
       await img.decode();
     } catch {
-      return [];
+      return null;
     }
     const h = Math.max(1, Math.round((w * img.height) / Math.max(1, img.width)));
     canvas.width = w;
     canvas.height = h;
     ctx.drawImage(img, 0, 0, w, h);
   }
+
   let data: Uint8ClampedArray;
   try {
     data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
   } catch {
-    return [];                                  // tainted canvas — treat as "no palette"
+    return null;                                  // tainted canvas — treat as "no reading"
   }
+  const CW = canvas.width;
+  const CH = canvas.height;
+  const lumAt = (px: number, py: number) => {
+    const i = (py * CW + px) * 4;
+    return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+  };
+
+  // ── palette: 4-bit histogram, scored by "usable as a UI colour" ──
   const buckets = new Map<string, { n: number; r: number; g: number; b: number }>();
   for (let i = 0; i < data.length; i += 4) {
     if (data[i + 3] < 200) continue;
@@ -788,33 +836,119 @@ async function extractPalette(url: string): Promise<string[]> {
     e.b += data[i + 2];
     buckets.set(key, e);
   }
-  // Pick colours by *presence in the picture* x *how usable they are as a tint*, not by raw
-  // pixel count. A night sky is mostly near-black, so "the most common colour" is usually a
-  // muddy dark grey that makes the whole UI look dirty; the aurora's green is far rarer but is
-  // the colour a person actually sees in that image.
   const score = (r: number, g: number, b: number): number => {
-    const col = [r, g, b];
     const max = Math.max(r, g, b);
     const min = Math.min(r, g, b);
-    const sat = max === 0 ? 0 : (max - min) / max;           // chroma, 0..1
-    const lig = (max + min) / 510;                           // lightness, 0..1
-    const mid = Math.max(0, 1 - Math.abs(lig - 0.55) * 1.8); // prefer mid-tones
-    return sat * mid;
+    const sat = max === 0 ? 0 : (max - min) / max;
+    const lig = (max + min) / 510;
+    return sat * Math.max(0, 1 - Math.abs(lig - 0.55) * 1.8);
   };
   const palette = [...buckets.values()]
-    .map((e) => {
-      const r = e.r / e.n;
-      const g = e.g / e.n;
-      const b = e.b / e.n;
-      return { r, g, b, n: e.n, weight: e.n * (0.25 + score(r, g, b)) };
-    })
-    .sort((a, b) => b.weight - a.weight)
+    .map((e) => ({ r: e.r / e.n, g: e.g / e.n, b: e.b / e.n, n: e.n, s: score(e.r / e.n, e.g / e.n, e.b / e.n) }))
+    // Near-grey and vanishingly rare colours are dropped, not ranked: one muddy grey cluster should
+    // not decide the whole theme.
+    .filter((e) => e.s > 0.1 && e.n > Math.max(4, data.length / 4 / 400))
+    .sort((a, b) => b.n * (0.3 + b.s) - a.n * (0.3 + a.s))
     .slice(0, 4)
     .map((e) => `${Math.round(e.r)}, ${Math.round(e.g)}, ${Math.round(e.b)}`);
-  paletteCache.set(url, palette);
-  return palette;
+
+  // ── light: brightest 3×3 cell, and how warm that cell is ──
+  const cells: { x: number; y: number; lum: number; r: number; g: number; b: number; n: number }[] = [];
+  for (let y = 0; y < 3; y++) {
+    for (let x = 0; x < 3; x++) {
+      let sum = 0;
+      let n = 0;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      for (let py = Math.floor((y * CH) / 3); py < ((y + 1) * CH) / 3; py += 2) {
+        for (let px = Math.floor((x * CW) / 3); px < ((x + 1) * CW) / 3; px += 2) {
+          const i = (py * CW + px) * 4;
+          sum += lumAt(px, py);
+          r += data[i];
+          g += data[i + 1];
+          b += data[i + 2];
+          n++;
+        }
+      }
+      if (n) cells.push({ x, y, lum: sum / n, r: r / n, g: g / n, b: b / n, n });
+    }
+  }
+  const brightest = cells.reduce((a, b) => (b.lum > a.lum ? b : a), cells[0]);
+  const lightness = cells.reduce((a, c) => a + c.lum, 0) / Math.max(1, cells.length);
+  const light = {
+    dirX: brightest.x - 1,
+    dirY: brightest.y - 1,
+    warmth: (brightest.r - brightest.b) / 255,
+    brightness: lightness / 255,
+  };
+
+  // ── density: 8×5 grid of local contrast (how busy the picture is there) ──
+  const mx = 8;
+  const my = 5;
+  const density: { busy: number; lum: number }[] = [];
+  const raw: { v: number; lum: number }[] = [];
+  for (let y = 0; y < my; y++) {
+    for (let x = 0; x < mx; x++) {
+      let sum = 0;
+      let sum2 = 0;
+      let n = 0;
+      for (let py = Math.floor((y * CH) / my); py < ((y + 1) * CH) / my; py += 1) {
+        for (let px = Math.floor((x * CW) / mx); px < ((x + 1) * CW) / mx; px += 1) {
+          const l = lumAt(px, py);
+          sum += l;
+          sum2 += l * l;
+          n++;
+        }
+      }
+      const mean = sum / Math.max(1, n);
+      raw.push({ v: Math.sqrt(Math.max(0, sum2 / Math.max(1, n) - mean * mean)), lum: mean });
+    }
+  }
+  const maxV = Math.max(...raw.map((d) => d.v), 1);
+  for (const d of raw) density.push({ busy: d.v / maxV, lum: d.lum });
+
+  // ── material: a rough read of what the picture is made of ──
+  const avgS = palette.length
+    ? palette.reduce((a, p) => a + score(...(p.split(",").map(Number) as [number, number, number])), 0) / palette.length
+    : 0;
+  const busyAvg = density.reduce((a, d) => a + d.busy, 0) / density.length;
+  const cool = light.warmth < -0.02;
+  const material: ArtworkReading["material"] =
+    palette.length === 0
+      ? "plain"
+      : avgS > 0.55 && busyAvg > 0.5
+        ? "neon"
+        : light.brightness > 0.62 && busyAvg < 0.45
+          ? "sky"
+          : cool && busyAvg > 0.45
+            ? "water"
+            : light.warmth > 0.05 && busyAvg > 0.45
+              ? "wood"
+              : busyAvg < 0.4
+                ? "paper"
+                : "plain";
+
+  const reading: ArtworkReading = { palette, light, density, material };
+  artworkCache.set(url, reading);
+  return reading;
 }
 
+/** Busyness of the picture under a viewport position (0..1), for the "stay off the subject" pass. */
+function busyUnder(art: ArtworkReading, fx: number, fy: number): number {
+  const x = Math.min(7, Math.max(0, Math.floor(fx * 8)));
+  const y = Math.min(4, Math.max(0, Math.floor(fy * 5)));
+  return art.density[y * 8 + x]?.busy ?? 0;
+}
+
+/**
+ * Reduce an image to a handful of representative colours. A 4-bit bucket histogram over a
+ * 64px-wide sampling is plenty for tinting chrome and costs a few milliseconds.
+ */
+async function extractPalette(url: string): Promise<string[]> {
+  const reading = await sampleArtwork(url);
+  return reading?.palette ?? [];
+}
 function visible(el: HTMLElement): boolean {
   const rect = el.getBoundingClientRect();
   if (rect.width < 8 || rect.height < 8) return false;
@@ -963,12 +1097,16 @@ interface AccentScheme {
   lineAlpha: number;
   /** True when the wallpaper actually offered a colour to build on. */
   fromArtwork: boolean;
+  /** The picture's own spark: its most vivid colour, kept for interactive states only. */
+  spark: string;
+  /** The colour of the light the picture is lit by, for the lit edge and the gradient. */
+  lightTint: string;
 }
 
 /** One hue in, a whole scheme out: three roles, contrast-checked against the surface. */
-function deriveScheme(palette: string[], mode: Mode): AccentScheme {
+function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["light"]): AccentScheme {
   const sampled = palette
-    .slice(0, 4)
+    .slice(0, 6)
     .map((p) => {
       const { r, g, b } = parseTriple(p);
       return { ...rgbToHsl(r, g, b) };
@@ -988,6 +1126,11 @@ function deriveScheme(palette: string[], mode: Mode): AccentScheme {
   const inkL = fitLightness(hue, Math.min(0.72, sat + 0.12), mode === "dark" ? 0.82 : 0.32, bgLum, 4.6, mode === "dark");
   const washL = mode === "dark" ? 0.62 : 0.48;
 
+  // The spark: the most vivid colour the picture has (usually not the seed), pushed until it is
+  // clearly readable, so it can mark "this is interactive" without shouting anywhere else.
+  const vivid = sampled.length > 1 ? sampled.find((c) => c.rank > 0.04) ?? sampled[0] : sampled[0];
+  const sparkL = fitLightness(vivid?.h ?? hue, Math.min(0.85, (vivid?.s ?? sat) + 0.15), mode === "dark" ? 0.78 : 0.44, bgLum, 3.4, mode === "dark");
+
   return {
     hue,
     sat,
@@ -997,6 +1140,9 @@ function deriveScheme(palette: string[], mode: Mode): AccentScheme {
     tint: mode === "dark" ? 0.16 : 0.10,
     lineAlpha: mode === "dark" ? 0.5 : 0.4,
     fromArtwork: Boolean(usable),
+    spark: hslTriple(vivid?.h ?? hue, Math.min(0.85, (vivid?.s ?? sat) + 0.15), sparkL).join(", "),
+    // 借光: the *colour of the light* the picture is lit by, not a colour from it.
+    lightTint: (light?.warmth ?? 0) > 0.02 ? "255, 236, 205" : "214, 236, 255",
   };
 }
 
@@ -1063,43 +1209,68 @@ function parseTriple(triple: string): { r: number; g: number; b: number } {
  *      the same ornament on both is what made the first attempt noisy;
  *   4. the tint always stays low-alpha, so the artwork behind is still the wallpaper.
  */
-function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: string): string {
-  const scheme = deriveScheme(palette, mode);
+function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: string, reading?: ArtworkReading | null): string {
+  const scheme = deriveScheme(palette, mode, reading?.light);
   const root = `body[${BODY_ATTR}][${ACCENT_ATTR}]`;
   const small = `${root} [${ACCENT_MARK}="small"]`;
   const panel = `${root} [${ACCENT_MARK}="panel"]`;
-  const { line, ink, wash } = scheme;
+  const both = `${small}, ${panel}`;
+  const { line, ink, wash, lightTint, spark } = scheme;
   const lines: string[] = [];
 
-  // Shared base: a low-alpha tint plus one hairline, and nothing else. This is the whole of level 0.
+  // Shared base: a low-alpha tint plus one hairline. This is the whole of level 0.
   //
   // The hairline is drawn with `outline` rather than `border`: outline costs no layout, cannot eat
   // a control's existing box-shadow, and `:not(:focus-visible)` keeps DSH's focus ring intact.
-  // (An early version set border-color only, which did nothing at all on the many controls that
-  // have no border width - the level slider then looked like it was broken.)
   const tint = [0.08, 0.11, 0.14, 0.16, 0.18][level] ?? 0.08;
   const alpha = [0.26, 0.34, 0.42, 0.48, 0.54][level] ?? 0.26;
   const hairline = (sel: string) =>
     `${sel}:not(:focus-visible) {\n  outline: 1px solid rgba(${line}, ${alpha}) !important;\n  outline-offset: -1px !important;\n}`;
+
+  // 借光 (borrowed light): the surface is lit by the picture's own light. A directional gradient
+  // replaces the flat tint, the edge nearest the light catches a bright hairline and the far side
+  // sinks. This is what makes the UI belong to the scene instead of sitting on top of it - and it
+  // costs nothing but a 3×3 brightness read.
+  const fromTop = (reading?.light.dirY ?? -1) <= 0;
+  const fromLeft = (reading?.light.dirX ?? -1) <= 0;
+  const toDark = `${fromTop ? "bottom" : "top"} ${fromLeft ? "right" : "left"}`;
+  const litEdge = fromTop ? "inset 0 1px 0" : "inset 0 -1px 0";
   lines.push(
-    `${small} {`,
+    `${both} {`,
     `  background-color: rgba(${wash}, ${tint}) !important;`,
-    // A single soft sheen, top to bottom, so a tinted control reads as a surface rather than a
-    // stain. One gradient - not a repeating pattern: stripes fight the wallpaper.
-    `  background-image: linear-gradient(180deg, rgba(${wash}, .16), rgba(${wash}, .02)) !important;`,
+    `  background-image: linear-gradient(to ${toDark}, rgba(${lightTint}, ${(0.14 + tint).toFixed(3)}), rgba(${wash}, ${(tint * 0.35).toFixed(3)}), rgba(${wash}, 0.02)) !important;`,
+    `  box-shadow: ${litEdge} rgba(${lightTint}, .32) !important;`,
+    // 呼吸 (breathing): recolours arrive slowly from the breathing pass; let the paint catch up
+    // instead of snapping.
+    `  transition: background-color 4s ease, border-color 4s ease, outline-color 4s ease !important;`,
     `}`,
   );
-  // Panels carry the same colour at a lower dose: a 20% wash over an 800px dialog reads as fog,
-  // while the same dose on a 30px button reads as "this is a button".
+  // 让位 (yield): where the picture is busy, decoration steps back - less tint, no gradient, no
+  // frame, and only a quarter-strength line (a control still has to read as a control). This is
+  // the fix for ornaments fighting the subject.
   lines.push(
-    `${panel} {`,
-    `  background-color: rgba(${wash}, ${Math.min(0.08, tint)}) !important;`,
+    `${root} [${ACCENT_MARK}][data-dsh-skin-busy="1"] {`,
+    `  background-color: rgba(${wash}, ${(tint * 0.5).toFixed(3)}) !important;`,
+    `  background-image: none !important;`,
+    `  border-image-source: none !important;`,
+    `  outline-color: rgba(${line}, ${(alpha * 0.45).toFixed(3)}) !important;`,
     `}`,
   );
-  lines.push(hairline(small));
+  // 火花 (the spark): the picture's most vivid colour is reserved for "you can touch this" -
+  // hover, focus, pressed and selected. Used nowhere else, so it stays meaningful.
+  lines.push(
+    `${root} [${ACCENT_MARK}]:hover { outline-color: rgba(${spark}, .8) !important; border-color: rgba(${spark}, .7) !important; }`,
+    `${root} [${ACCENT_MARK}]:focus-visible { outline-color: rgba(${spark}, .85) !important; }`,
+    `${root} [${ACCENT_MARK}][aria-pressed="true"], ${root} [${ACCENT_MARK}][aria-selected="true"], ${root} [${ACCENT_MARK}][data-on="true"], ${root} [${ACCENT_MARK}][data-active="true"] {`,
+    `  outline-color: rgba(${spark}, .85) !important;`,
+    `  border-color: rgba(${spark}, .8) !important;`,
+    `}`,
+  );
+
+  lines.push(hairline(`${small}:not([data-dsh-skin-busy="1"])`));
 
   if (level === 0) {
-    lines.push(hairline(panel));
+    lines.push(hairline(`${panel}:not([data-dsh-skin-busy="1"])`));
     return lines.join("\n");
   }
 
@@ -1130,7 +1301,7 @@ function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: st
 }
 
 /** Reflect the configured level + artwork onto the skeleton. */
-async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit): Promise<void> {
+async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refresh = false): Promise<void> {
   let style = document.getElementById(ACCENT_STYLE_ID) as HTMLStyleElement | null;
   const raw = Number(value.accentLevel ?? 0);
   const level = Number.isFinite(raw)
@@ -1152,11 +1323,22 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit): Promi
     return;
   }
 
-  const palette = await extractPalette(wallpaper);
+  const reading = await sampleArtwork(wallpaper, refresh);
+  const palette = reading?.palette ?? [];
   if (!palette.length) {
     document.body.removeAttribute(ACCENT_ATTR);
     style?.remove();
     return;
+  }
+
+  // 呼吸: keep the first hue for this wallpaper, and hold rather than jump when a video frame
+  // drifts somewhere else entirely. Subtle drift is the point; a colour swing is not.
+  const frameHue = seedHueOf(palette);
+  if (!breathSeed || breathSeed.url !== wallpaper) breathSeed = { url: wallpaper, hue: frameHue };
+  else if (refresh && breathSeed.hue !== null && frameHue !== null && hueDistance(frameHue, breathSeed.hue) > 25) {
+    return;                                       // too far from the seed - keep what we have
+  } else if (breathSeed.hue === null && frameHue !== null) {
+    breathSeed.hue = frameHue;
   }
 
   // Hand the sampled colours to the AI half: without them the generation prompt could only say
@@ -1171,11 +1353,21 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit): Promi
   const writeKey = `${wallpaper}|${joined}`;
   if (commit && paletteWriteKey !== writeKey && String(value.accentPalette ?? "") !== joined) {
     paletteWriteKey = writeKey;
-    void commit({ accentPalette: joined });
+    // 借材: the material read travels with the palette so the AI half can ask for the right kind of
+    // ornament (silver for a night sky, gold leaf for paper, ...).
+    void commit({ accentPalette: joined, accentMaterial: reading?.material ?? "plain" });
   }
 
   accentTargets = scanAccentTargets();
-  accentTargets.forEach((el) => el.setAttribute(ACCENT_MARK, accentRole(el)));
+  const vw = Math.max(1, window.innerWidth);
+  const vh = Math.max(1, window.innerHeight);
+  accentTargets.forEach((el) => {
+    el.setAttribute(ACCENT_MARK, accentRole(el));
+    // 让位: look up how busy the picture is under this element's centre.
+    const rect = el.getBoundingClientRect();
+    const busy = reading ? busyUnder(reading, (rect.left + rect.width / 2) / vw, (rect.top + rect.height / 2) / vh) : 0;
+    el.setAttribute(BUSY_ATTR, busy > 0.55 ? "1" : "0");
+  });
   document.body.setAttribute(ACCENT_ATTR, String(effective));
 
   if (!style) {
@@ -1183,14 +1375,18 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit): Promi
     style.id = ACCENT_STYLE_ID;
     document.head.append(style);
   }
-  style.textContent = accentCss(palette, effective, mode, String(value.accentFrame ?? ""));
+  style.textContent = accentCss(palette, effective, mode, String(value.accentFrame ?? ""), reading);
 }
 
 function disposeAccent(): void {
   document.getElementById(ACCENT_STYLE_ID)?.remove();
   document.body.removeAttribute(ACCENT_ATTR);
-  document.querySelectorAll<HTMLElement>(`[${ACCENT_MARK}]`).forEach((el) => el.removeAttribute(ACCENT_MARK));
+  document.querySelectorAll<HTMLElement>(`[${ACCENT_MARK}]`).forEach((el) => {
+    el.removeAttribute(ACCENT_MARK);
+    el.removeAttribute(BUSY_ATTR);
+  });
   accentTargets = [];
+  breathSeed = null;
 }
 
 // ── regions ─────────────────────────────────────────────────────────────────
@@ -2076,6 +2272,7 @@ function AiAccentPanel(props: {
     strength: props.strength,
     style: String(v.accentStyle ?? ""),
     palette: String(v.accentPalette ?? "").split("|").map((s) => s.trim()).filter(Boolean),
+    material: String(v.accentMaterial ?? ""),
     extra: String(v.accentPromptExtra ?? ""),
   });
 
@@ -2852,6 +3049,17 @@ export function apply(ctx: ClientContext): void {
         if (flipped) renderSkin(true);
         else render();
       }) as (() => void) | undefined;
+      // 呼吸 (breathing): a video backdrop keeps moving, so re-read a frame now and then and let the
+      // accent drift with it - slowly, and only within a small hue distance of the seed (see the
+      // guard in applyAccent). Off entirely for still images, and when the accent is off.
+      const breatheTimer = window.setInterval(() => {
+        const snapshot = scope.getSnapshot();
+        const v = snapshot.value;
+        if (!v || v.accentEnabled === false || Number(v.accentLevel ?? 0) < 1) return;
+        const img = resolveAreaImage(v, "window", modeStore.get());
+        if (!img || !VIDEO_RE.test(img)) return;
+        void applyAccent(v, modeStore.get(), commit, true);
+      }, 8000);
       // Repaint on structural churn (regions mounting/unmounting, re-renders) and on
       // theme flips. Attribute observation stays limited to the theme flag, so our own
       // inline styles and data-* tags can never re-trigger the observer.
@@ -2874,6 +3082,7 @@ export function apply(ctx: ClientContext): void {
           clearTimeout(gcTimer);
           gcTimer = null;
         }
+        clearInterval(breatheTimer);
         if (themeAnimTimer) {
           clearTimeout(themeAnimTimer);
           themeAnimTimer = null;
