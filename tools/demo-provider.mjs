@@ -167,11 +167,62 @@ function readBody(req) {
   });
 }
 
+const tasks = new Map();          // DashScope-style job ids -> { png, polls, count, prompt }
+let taskSeq = 0;
+
 const server = createServer(async (req, res) => {
   const url = new URL(req.url ?? "/", `http://127.0.0.1:${PORT}`);
   if (req.method === "GET" && url.pathname === "/health") {
     res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({ ok: true, model: "demo", endpoint: "/v1/images/generations" }));
+    res.end(JSON.stringify({ ok: true, model: "demo", openai: "/v1/images/generations", dashscope: "/api/v1/services/aigc/text2image/image-synthesis" }));
+    return;
+  }
+
+  // ── DashScope: submit a job, then poll its task id (通义万相/千问走的就是这套） ──
+  if (req.method === "POST" && /\/services\/aigc\/text2image\/image-synthesis$/.test(url.pathname)) {
+    let prompt = "";
+    let count = 1;
+    try {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      prompt = String(body?.input?.prompt ?? body?.prompt ?? "");
+      count = Math.max(1, Math.min(4, Math.round(Number(body?.parameters?.n ?? body?.n) || 1)));
+    } catch {
+      res.writeHead(400, { "content-type": "application/json" });
+      res.end(JSON.stringify({ code: "InvalidParameter", message: "bad json" }));
+      return;
+    }
+    const id = `demo-task-${++taskSeq}`;
+    tasks.set(id, { png: drawOrnament(prompt), polls: 0, count, prompt });
+    console.log(`[demo-provider] dashscope job ${id}: ${count} 张 · ${prompt.slice(0, 50)}…`);
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ request_id: `demo-${id}`, output: { task_id: id, task_status: "PENDING" } }));
+    return;
+  }
+  const taskMatch = /\/tasks\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
+  if (req.method === "GET" && taskMatch) {
+    const job = tasks.get(taskMatch[1]);
+    if (!job) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ output: { task_status: "UNKNOWN" } }));
+      return;
+    }
+    // Answer RUNNING once, so the poll loop is genuinely exercised.
+    job.polls += 1;
+    if (job.polls < 2) {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ output: { task_id: taskMatch[1], task_status: "RUNNING" } }));
+      return;
+    }
+    const results = Array.from({ length: job.count }, () => ({ url: `http://127.0.0.1:${PORT}/ornament/${taskMatch[1]}.png` }));
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({ request_id: `demo-${taskMatch[1]}`, output: { task_id: taskMatch[1], task_status: "SUCCEEDED", results } }));
+    return;
+  }
+  const ornamentMatch = /\/ornament\/([A-Za-z0-9_-]+)\.png$/.exec(url.pathname);
+  if (req.method === "GET" && ornamentMatch) {
+    const job = tasks.get(ornamentMatch[1]);
+    res.writeHead(200, { "content-type": "image/png" });
+    res.end(job ? job.png : drawOrnament(""));
     return;
   }
   if (req.method === "POST" && url.pathname === "/v1/images/generations") {

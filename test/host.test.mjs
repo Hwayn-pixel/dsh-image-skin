@@ -339,6 +339,58 @@ const okGen = { providerId: "custom", baseUrl: "http://127.0.0.1:9/v1", model: "
 }
 check("global fetch is restored", globalThis.fetch === realFetch);
 
+console.log("== ai accent: dashscope (submit + poll) ==");
+{
+  // Image synthesis at Alibaba Model Studio is asynchronous: POST the job, then poll the task id.
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    calls.push({ url: u, init });
+    if (u.endsWith("/services/aigc/text2image/image-synthesis")) {
+      return new Response(JSON.stringify({ output: { task_id: "t-1", task_status: "PENDING" } }), { status: 200 });
+    }
+    if (u.endsWith("/tasks/t-1")) {
+      const polls = calls.filter((c) => c.url.endsWith("/tasks/t-1")).length;
+      if (polls < 2) return new Response(JSON.stringify({ output: { task_id: "t-1", task_status: "RUNNING" } }), { status: 200 });
+      return new Response(JSON.stringify({ output: { task_id: "t-1", task_status: "SUCCEEDED", results: [{ url: "http://127.0.0.1:9/ornament.png" }] } }), { status: 200 });
+    }
+    return new Response(Buffer.from(PNG, "base64"), { status: 200, headers: { "content-type": "image/png" } });
+  };
+  const r = await call(
+    "POST",
+    "/dsh-image-skin/gen",
+    JSON.stringify({ providerId: "dashscope-wanx", apiKey: "k", prompt: "border", count: 2, size: "720x1280" }),
+  );
+  const body = json(r);
+  check("dashscope: submit + poll -> 200 with a stored image", r.status === 200 && body?.urls?.length === 1, `${r.status} ${r.body}`);
+  const submit = calls.find((c) => c.url.endsWith("/services/aigc/text2image/image-synthesis"));
+  const sent = JSON.parse(submit?.init?.body ?? "{}");
+  check("dashscope: sizes use * not x", sent?.parameters?.size === "720*1280", JSON.stringify(sent));
+  check("dashscope: prompt rides in input.prompt", sent?.input?.prompt === "border", JSON.stringify(sent));
+  check("dashscope: asks for async processing", submit?.init?.headers?.["X-DashScope-Async"] === "enable", JSON.stringify(submit?.init?.headers));
+  check("dashscope: the preset model is used by default", sent?.model === "wanx2.1-t2i-turbo", String(sent?.model));
+  check("dashscope: polls the task until it succeeds", calls.filter((c) => c.url.endsWith("/tasks/t-1")).length === 2, String(calls.length));
+  globalThis.fetch = realFetch;
+}
+{
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.endsWith("/services/aigc/text2image/image-synthesis")) {
+      return new Response(JSON.stringify({ output: { task_id: "t-2", task_status: "PENDING" } }), { status: 200 });
+    }
+    return new Response(JSON.stringify({ output: { task_status: "FAILED", code: "DataInspectionFailed", message: "blocked" } }), { status: 200 });
+  };
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ providerId: "dashscope-wanx", apiKey: "k", prompt: "border" }));
+  check("dashscope: a failed task -> 502 quoting the status", r.status === 502 && /FAILED/.test(json(r)?.error ?? ""), r.body);
+  globalThis.fetch = realFetch;
+}
+{
+  globalThis.fetch = async () => new Response(JSON.stringify({ output: { task_status: "PENDING" } }), { status: 200 });
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ providerId: "dashscope-wanx", apiKey: "k", prompt: "border" }));
+  check("dashscope: no task id -> 502 naming it", r.status === 502 && /task_id/.test(json(r)?.error ?? ""), r.body);
+  globalThis.fetch = realFetch;
+}
+
 console.log("== disposer ==");
 check("effect kept the route disposer", typeof capturedDisposer === "function");
 capturedDisposer?.();

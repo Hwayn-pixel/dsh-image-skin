@@ -33,7 +33,8 @@ exactly where you want it**, and it does a few things the others do not:
   grey. Level 0 does that locally, offline. Levels 1–2 add a hairline and a corner ornament drawn
   on your machine; levels 3–4 ask a text-to-image model for a real ornamental frame — corner
   flourishes and a repeating edge, no text, no figures — which is then used as a panel frame. Any
-  OpenAI-compatible image API will do; the key stays on your machine. The sampled colours ride
+  OpenAI-compatible image API will do, and Alibaba's Model Studio (通义万相 / 千问) is supported through
+  its own submit-and-poll protocol; the key stays on your machine. The sampled colours ride
   along in the prompt, so the ornament comes back in your wallpaper's palette, and a video backdrop
   is sampled from a real frame. The whole thing is built from a single hue: the sampler's four
   colours are reduced to one, and each role (hairline, corner ink, surface tint) is derived from
@@ -232,7 +233,7 @@ dsh plugin --profile web add dsh-image-skin
 | `src/client/index.ts` | 浏览器半：绑定设置、把图片贴到对应区域、注册设置二级菜单 |
 | `cordis.patch.yml` | bundle patch：把插件注册进 web profile |
 | `build.mjs` | 把 TS 编译成 `lib/index.js` + `lib/client.js` |
-| `test/host.test.mjs` | 宿主半离线测试（路由 / 上传上限 / GC / 路径穿越 / AI 纹样全分支） |
+| `test/host.test.mjs` | 宿主半离线测试（路由 / 上传上限 / GC / 路径穿越 / AI 纹样全分支 / 通义异步任务） |
 | `tools/demo-provider.mjs` | 本机假生图服务（`npm run demo:provider`），无 key 也能跑通“生成→图墙→应用” |
 
 **扩展新区域**：`src/index.ts` 的 `IMAGE_AREAS` 加一个 id（schema 自动生成字段）→

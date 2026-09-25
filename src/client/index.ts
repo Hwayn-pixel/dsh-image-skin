@@ -862,11 +862,14 @@ function scanAccentTargets(): HTMLElement[] {
   return [...found];
 }
 
-/** A surface big enough to carry a frame, versus a control that only wants a hairline. */
+/** A surface big enough to carry a frame, versus a control or a card that only wants a hairline. */
 function accentRole(el: HTMLElement): "panel" | "small" {
-  if (el.matches('[role="dialog"], [role="menu"], [role="listbox"], [data-settings-section]')) return "panel";
+  if (el.matches('[role="dialog"], [role="menu"], [role="listbox"]')) return "panel";
+  // Nothing inside a panel is a panel. The dialog already wears the frame; framing its contents too
+  // turned the settings screen into a nest of rectangles, which is exactly what read as stiff.
+  if (el.closest('[role="dialog"], [role="menu"], [role="listbox"]')) return "small";
   const rect = el.getBoundingClientRect();
-  return rect.width >= 240 && rect.height >= 90 ? "panel" : "small";
+  return rect.width >= 480 && rect.height >= 260 ? "panel" : "small";
 }
 
 // ── colour ──────────────────────────────────────────────────────────────────
@@ -1056,8 +1059,8 @@ function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: st
   // a control's existing box-shadow, and `:not(:focus-visible)` keeps DSH's focus ring intact.
   // (An early version set border-color only, which did nothing at all on the many controls that
   // have no border width - the level slider then looked like it was broken.)
-  const tint = [0.1, 0.15, 0.2, 0.24, 0.28][level] ?? 0.1;
-  const alpha = [0.28, 0.45, 0.58, 0.68, 0.78][level] ?? 0.28;
+  const tint = [0.08, 0.11, 0.14, 0.16, 0.18][level] ?? 0.08;
+  const alpha = [0.26, 0.34, 0.42, 0.48, 0.54][level] ?? 0.26;
   const hairline = (sel: string) =>
     `${sel}:not(:focus-visible) {\n  outline: 1px solid rgba(${line}, ${alpha}) !important;\n  outline-offset: -1px !important;\n}`;
   lines.push(
@@ -1069,10 +1072,10 @@ function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: st
     `}`,
   );
   // Panels carry the same colour at a lower dose: a 20% wash over an 800px dialog reads as fog,
-  // while the same 20% on a 30px button reads as "this is a button".
+  // while the same dose on a 30px button reads as "this is a button".
   lines.push(
     `${panel} {`,
-    `  background-color: rgba(${wash}, ${Math.min(0.12, tint)}) !important;`,
+    `  background-color: rgba(${wash}, ${Math.min(0.08, tint)}) !important;`,
     `}`,
   );
   lines.push(hairline(small));
@@ -1088,7 +1091,7 @@ function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: st
   const art =
     chosenFrame && level >= 3
       ? `url("${chosenFrame}")`
-      : frameDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`, level >= 3 ? "rich" : level >= 2 ? "bracket" : "tick");
+      : frameDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`, level >= 4 ? "rich" : level >= 2 ? "bracket" : "tick");
   // The frame is a fixed number of pixels per side, so a panel needs more of them than it looks:
   // a 9px frame on an 800px dialog scales its corner motif down to two pixels and vanishes. The
   // generated art is heavier per pixel, so it gets less width - at 18px it started covering the
@@ -2069,7 +2072,7 @@ function AiAccentPanel(props: {
 
   const generate = async () => {
     setBusy(true);
-    setStatus("生成中…（一般 10-60 秒）");
+    setStatus("生成中…（通常 10–90 秒；阿里云排队时可能 1–2 分钟）");
     setResults([]);
     try {
       const prompt = await fetchPrompt();
@@ -2152,7 +2155,14 @@ function AiAccentPanel(props: {
     ),
 
     isCustom ? field("base", "Base URL", textInput("accentBaseUrl", { placeholder: "https://your-endpoint/v1" })) : null,
-    isCustom ? field("model", "模型 ID", textInput("accentModel", { placeholder: "your-model-id" })) : null,
+    // The model is an override for presets too: 通义万相 has turbo / plus / 2.2 and qwen-image
+    // variants, and "switch to 自定义 and retype everything" is a silly way to try another one.
+    field(
+      "model",
+      "模型 ID",
+      textInput("accentModel", { placeholder: current?.model ? String(current.model) : "your-model-id" }),
+      isCustom ? undefined : "留空则用该服务商的默认模型",
+    ),
 
     field(
       "keysrc",

@@ -39,6 +39,13 @@ An accent pass over the interface skeleton, plus AI-generated ornament borders.
   frame to the generated ornament. The old copy credited the model for all four.
 
 ### Added
+- **通义万相 / 千问（阿里云百炼）now works.** DashScope image synthesis is *not* OpenAI-shaped: you
+  submit a job, poll the task id, and the pictures come back as short-lived OSS urls, with sizes
+  written `1024*1024`. A small adapter speaks that protocol, and the preset points at it — the old
+  entry aimed at a “compatible-mode” endpoint that does not serve image models, so it would have
+  failed on the first real key.
+- **The model id is editable for presets too** (the placeholder shows the default), so trying
+  `wanx2.1-t2i-plus` or `wan2.2-t2i-plus` no longer means switching to 自定义 and retyping everything.
 - **Entry cards carry state.** Level one answers "where am I up to?" without a click: the 贴图 card shows
   how many areas are configured, the AI card shows the current level (or that decoration is off).
   Group headers carry the same count as `1/6 已配`, a dashed card and a 从这里开始 tag mark the first
@@ -101,6 +108,9 @@ An accent pass over the interface skeleton, plus AI-generated ornament borders.
 - The browser suite grew from 11 to 19: the AI gate (`windowHasArtwork`) is pinned for a shared
   image, a light-only image, a dark-only image, an empty string, and for other regions that must
   *not* unlock the AI screen.
+- The host suite grew from 68 to 76 with the DashScope path: submit → poll (RUNNING then SUCCEEDED)
+  → download, the `*`-style size, the async header, the preset model, a FAILED task, and a reply
+  with no task id.
 
 ## 0.3.0 — 2026-09-24
 
