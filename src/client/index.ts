@@ -2343,6 +2343,7 @@ function AiAccentPanel(props: {
   const [stage, setStage] = React.useState<string | null>(null);
   const [status, setStatus] = React.useState<{ kind: "ok" | "err"; text: string; hint?: string } | null>(null);
   const [promptDraft, setPromptDraft] = React.useState<string | null>(null);
+  const [autoPrompt, setAutoPrompt] = React.useState<string | null>(null);
   const [keyCheck, setKeyCheck] = React.useState<string | null>(null);
   const [checking, setChecking] = React.useState(false);
   const [advanced, setAdvanced] = React.useState(false);
@@ -2389,7 +2390,6 @@ function AiAccentPanel(props: {
     apiKeyEnv: String(v.accentKeyEnv ?? ""),
   });
 
-  const [autoPrompt, setAutoPrompt] = React.useState<string | null>(null);
   const fetchPrompt = async (): Promise<string> => {
     const res = await fetch(`${ROUTE_PREFIX}/prompt`, {
       method: "POST",
@@ -2406,12 +2406,37 @@ function AiAccentPanel(props: {
     return String(data?.prompt ?? "");
   };
 
+  // The prompt follows the settings live, until the moment you type in it. Before this it was
+  // composed once (by "取提示词") and then frozen, so moving the slider afterwards silently changed
+  // nothing - which is exactly how "滑块真的在控制画面吗" becomes a fair question.
+  const composeKey = [
+    props.strength,
+    String(v.accentStyle ?? ""),
+    String(v.accentPalette ?? ""),
+    String(v.accentMaterial ?? ""),
+    String(v.accentPromptExtra ?? ""),
+  ].join("~");
+  React.useEffect(() => {
+    if (promptDraft !== null) return;
+    let alive = true;
+    const timer = setTimeout(() => {
+      void (async () => {
+        const text = await fetchPrompt();
+        if (alive && text) setAutoPrompt(text);
+      })();
+    }, 350);
+    return () => {
+      alive = false;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [composeKey, promptDraft]);
+
   const preview = async () => {
     try {
       const text = await fetchPrompt();
       setAutoPrompt(text);
-      setPromptDraft((draft) => draft ?? text);
-      setStatus({ kind: "ok", text: "提示词已按当前设定拼好，你可以直接改。" });
+      setStatus({ kind: "ok", text: "这就是这次会发出去的字（你改了就按你改的来）。" });
     } catch (error) {
       setStatus({ kind: "err", text: `取不到提示词：${String(error)}` });
     }
@@ -2447,7 +2472,7 @@ function AiAccentPanel(props: {
     setStatus(null);
     setStage("submitted");
     try {
-      const prompt = promptDraft ?? (await fetchPrompt());
+      const prompt = promptDraft ?? (autoPrompt || (await fetchPrompt()));
       const payload = {
         ...keyPayload(),
         prompt,
@@ -2639,8 +2664,6 @@ function AiAccentPanel(props: {
               "data-variant": "quiet",
               onClick: () => {
                 props.onSet("accentStyle", preset.text);
-                setPromptDraft(null);
-                setAutoPrompt(null);
               },
             },
             preset.name,
@@ -2656,15 +2679,17 @@ function AiAccentPanel(props: {
         className: "dshImgSkin-input dshImgSkin-textarea",
         rows: 4,
         value: promptDraft ?? autoPrompt ?? "",
-        placeholder: "点「取提示词」按当前设定拼一份，然后你随便改",
+        placeholder: "正在按当前设定拼提示词…你打一个字就会固定下来",
         onChange: (e: any) => setPromptDraft(e.target.value),
       }),
-      promptDraft && autoPrompt && promptDraft !== autoPrompt ? "已手改（生成用你改的这份）" : undefined,
+      promptDraft !== null
+        ? "已手改（生成用你改的这份）"
+        : "跟随上面的设定实时更新；你打一个字就固定下来",
     ),
     h(
       "div",
       { className: "dshImgSkin-inline" },
-      h("button", { className: "dshImgSkin-btn", type: "button", onClick: () => void preview() }, "取提示词"),
+      h("button", { className: "dshImgSkin-btn", type: "button", onClick: () => void preview() }, "看看会发什么"),
       h(
         "button",
         {
@@ -2673,11 +2698,10 @@ function AiAccentPanel(props: {
           "data-variant": "quiet",
           onClick: () => {
             setPromptDraft(null);
-            setAutoPrompt(null);
             setStatus(null);
           },
         },
-        "重置为自动",
+        "恢复跟随设定",
       ),
       h(
         "span",

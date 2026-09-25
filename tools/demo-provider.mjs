@@ -12,7 +12,9 @@
  * `http://127.0.0.1:8899/v1`, 模型 ID `demo`, Key 随便填一个字, 点「生成装饰」.
  *
  * The ornament is drawn locally from the colour palette in the prompt (`colour palette r, g, b / ...`),
- * so it is deterministic: same prompt in, same picture out. No network, no key, no cost.
+ * so it is deterministic: same prompt in, same picture out. `n` pictures come back as n *variants*
+ * (a bigger centre mark each), because a demo that returns the same file n times is indistinguishable
+ * from a bug in the plugin. No network, no key, no cost.
  */
 import { createServer } from "node:http";
 import { deflateSync } from "node:zlib";
@@ -121,11 +123,11 @@ function paletteFromPrompt(prompt) {
   return colours;
 }
 
-function drawOrnament(prompt) {
+function drawOrnament(prompt, variant = 0) {
   const [base, alt] = paletteFromPrompt(prompt);
   const strength = /embossed|jewelled/i.test(prompt) ? 4 : /rich layered|ornate corner flourishes/i.test(prompt) ? 3 : /clear corner motif/i.test(prompt) ? 2 : 1;
   const c = new Canvas(SIZE);
-  const inset = 12;
+  const inset = 12 + (variant % 2) * 6;
   // outer and inner rail
   c.frame(inset, inset, SIZE - inset * 2, SIZE - inset * 2, 7, base);
   c.frame(inset + 22, inset + 22, SIZE - (inset + 22) * 2, SIZE - (inset + 22) * 2, 3, alt);
@@ -141,7 +143,7 @@ function drawOrnament(prompt) {
     if (strength >= 4) c.dot(cx, cy, 4, base);
   }
   // repeating edge figures
-  const steps = strength >= 3 ? 9 : 6;
+  const steps = (strength >= 3 ? 9 : 6) + (variant % 3);
   for (let i = 1; i < steps; i++) {
     const t = Math.round((SIZE / steps) * i);
     const r = strength >= 3 ? 5 : 4;
@@ -153,6 +155,13 @@ function drawOrnament(prompt) {
   // a second, denser rail for the busier strengths
   if (strength >= 3) {
     c.frame(inset + 40, inset + 40, SIZE - (inset + 40) * 2, SIZE - (inset + 40) * 2, 1, alt);
+  }
+  // A centre mark that grows with the variant. Two pictures from one prompt must never be
+  // confusable - that was the whole reason "2 张" looked like a bug.
+  if (variant > 0) {
+    c.diamond(SIZE / 2, SIZE / 2, 10 + variant * 4, base);
+    c.diamond(SIZE / 2, SIZE / 2, 5 + variant * 2, alt);
+    c.dot(SIZE / 2, SIZE / 2, 2 + variant, base);
   }
   return encodePng(c.data, SIZE, SIZE);
 }
@@ -192,8 +201,9 @@ const server = createServer(async (req, res) => {
       return;
     }
     const id = `demo-task-${++taskSeq}`;
-    tasks.set(id, { png: drawOrnament(prompt), polls: 0, count, prompt });
-    console.log(`[demo-provider] dashscope job ${id}: ${count} 张 · ${prompt.slice(0, 50)}…`);
+    // Each job starts at a different variant: two independent jobs are two different samples on a
+    // real service, and a demo that answers with the same picture twice hides plugin bugs.
+    tasks.set(id, { seed: taskSeq % 4, polls: 0, count, prompt });    console.log(`[demo-provider] dashscope job ${id}: ${count} 张 · ${prompt.slice(0, 50)}…`);
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ request_id: `demo-${id}`, output: { task_id: id, task_status: "PENDING" } }));
     return;
@@ -213,16 +223,22 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify({ output: { task_id: taskMatch[1], task_status: "RUNNING" } }));
       return;
     }
-    const results = Array.from({ length: job.count }, () => ({ url: `http://127.0.0.1:${PORT}/ornament/${taskMatch[1]}.png` }));
+    const results = Array.from({ length: job.count }, (_, i) => ({ url: `http://127.0.0.1:${PORT}/ornament/${taskMatch[1]}-${i}.png` }));
     res.writeHead(200, { "content-type": "application/json" });
     res.end(JSON.stringify({ request_id: `demo-${taskMatch[1]}`, output: { task_id: taskMatch[1], task_status: "SUCCEEDED", results } }));
     return;
   }
   const ornamentMatch = /\/ornament\/([A-Za-z0-9_-]+)\.png$/.exec(url.pathname);
   if (req.method === "GET" && ornamentMatch) {
-    const job = tasks.get(ornamentMatch[1]);
+    // `<id>.png` is variant 0; `<id>-<n>.png` is the n-th picture of that job.
+    const name = ornamentMatch[1];
+    const suffix = /-(\d+)$/.exec(name);
+    const exact = tasks.get(name);
+    const job = exact ?? (suffix ? tasks.get(name.slice(0, -suffix[0].length)) : undefined);
+    const index = !exact && suffix ? Number(suffix[1]) : 0;
+    const variant = job ? ((job.seed ?? 0) + index) % 4 : 0;
     res.writeHead(200, { "content-type": "image/png" });
-    res.end(job ? job.png : drawOrnament(""));
+    res.end(job ? drawOrnament(job.prompt, variant) : drawOrnament(""));
     return;
   }
   if (req.method === "POST" && url.pathname === "/v1/images/generations") {
@@ -240,11 +256,9 @@ const server = createServer(async (req, res) => {
       res.end(JSON.stringify({ error: { message: "bad json" } }));
       return;
     }
-    const png = drawOrnament(prompt);
-    // The demo always returns one picture, repeated — enough to exercise the wall and the n clamp.
     const data = Array.from({ length: count }, (_, i) => ({
-      b64_json: png.toString("base64"),
-      revised_prompt: `demo ornament #${i + 1} at ${requested}px`,
+      b64_json: drawOrnament(prompt, i).toString("base64"),
+      revised_prompt: `demo ornament #${i + 1} of ${count} at ${requested}px`,
     }));
     console.log(`[demo-provider] ${count} × ${requested}px for prompt: ${prompt.slice(0, 60)}…`);
     res.writeHead(200, { "content-type": "application/json" });

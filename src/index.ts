@@ -260,73 +260,104 @@ async function callDashscope(
   stage?: (s: string) => void,
 ): Promise<{ ok: true; images: string[] } | { ok: false; error: string }> {
   const base = provider.baseUrl.replace(/\/+$/, "");
-  let submitted: Response;
-  try {
-    submitted = await fetch(`${base}/services/aigc/text2image/image-synthesis`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${key}`,
-        "X-DashScope-Async": "enable",
-      },
-      body: JSON.stringify({
-        model: provider.model,
-        input: { prompt: body.prompt },
-        parameters: { size: body.size.replace(/x/i, "*"), n: body.count },
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
-  } catch (error) {
-    return { ok: false, error: `请求失败：${(error as Error).message}` };
-  }
-  const text = await submitted.text();
-  if (!submitted.ok) {
-    return { ok: false, error: `${provider.label} 返回 ${submitted.status}：${text.slice(0, 300)}` };
-  }
-  let payload: any;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    return { ok: false, error: `无法解析响应：${text.slice(0, 200)}` };
-  }
-  const immediate = collectDashscopeImages(payload);
-  if (immediate.length) return { ok: true, images: immediate };
-  const taskId = payload?.output?.task_id ?? payload?.task_id;
-  if (!taskId) return { ok: false, error: `响应里没有 task_id：${text.slice(0, 200)}` };
+  // One image per request. DashScope's `n` is not something we can rely on (and a single request
+  // with n>1 tends to come back as the same picture n times), so "2 张" means two independent
+  // jobs: each is its own sampling, which is the only way the count actually shows.
+  const jobs = Math.max(1, Math.min(4, Math.round(body.count || 1)));
 
-  // Poll. Image jobs queue for a while; bounded at ~150s so a stuck job cannot hold the request
-  // open forever.
-  for (let attempt = 0; attempt < 60; attempt++) {
-    await sleep(2_500);
-    stage?.(attempt === 0 ? "queued" : "running");
-    let poll: Response;
+  interface SubmitResult {
+    ok: boolean;
+    taskId?: string;
+    images?: string[];
+    error?: string;
+  }
+
+  const submitOne = async (): Promise<SubmitResult> => {
+    let submitted: Response;
     try {
-      poll = await fetch(`${base}/tasks/${taskId}`, {
-        headers: { authorization: `Bearer ${key}` },
-        signal: AbortSignal.timeout(20_000),
+      submitted = await fetch(`${base}/services/aigc/text2image/image-synthesis`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${key}`,
+          "X-DashScope-Async": "enable",
+        },
+        body: JSON.stringify({
+          model: provider.model,
+          input: { prompt: body.prompt },
+          parameters: { size: body.size.replace(/x/i, "*") },
+        }),
+        signal: AbortSignal.timeout(30_000),
       });
     } catch (error) {
-      return { ok: false, error: `轮询失败：${(error as Error).message}` };
+      return { ok: false, error: `请求失败：${(error as Error).message}` };
     }
-    const pollText = await poll.text();
-    let state: any;
+    const text = await submitted.text();
+    if (!submitted.ok) {
+      return { ok: false, error: `${provider.label} 返回 ${submitted.status}：${text.slice(0, 300)}` };
+    }
+    let payload: any;
     try {
-      state = JSON.parse(pollText);
+      payload = JSON.parse(text);
     } catch {
-      return { ok: false, error: `无法解析轮询响应：${pollText.slice(0, 200)}` };
+      return { ok: false, error: `无法解析响应：${text.slice(0, 200)}` };
     }
-    const status = String(state?.output?.task_status ?? state?.task_status ?? "").toUpperCase();
-    if (status === "SUCCEEDED") {
-      const images = collectDashscopeImages(state);
-      return images.length
-        ? { ok: true, images }
-        : { ok: false, error: `任务成功但没有图片：${pollText.slice(0, 200)}` };
-    }
-    if (status === "FAILED" || status === "CANCELED" || status === "UNKNOWN") {
-      return { ok: false, error: `任务未完成（${status}）：${pollText.slice(0, 300)}` };
+    const immediate = collectDashscopeImages(payload);
+    if (immediate.length) return { ok: true, images: immediate };
+    const taskId = payload?.output?.task_id ?? payload?.task_id;
+    if (!taskId) return { ok: false, error: `响应里没有 task_id：${text.slice(0, 200)}` };
+    return { ok: true, taskId: String(taskId) };
+  };
+
+  const images: string[] = [];
+  const waiting = new Set<string>();
+  for (let i = 0; i < jobs; i++) {
+    const one = await submitOne();
+    if (!one.ok) return { ok: false, error: one.error ?? "提交失败" };
+    if (one.images?.length) images.push(...one.images);
+    else if (one.taskId) waiting.add(one.taskId);
+  }
+  if (!waiting.size) {
+    return images.length ? { ok: true, images } : { ok: false, error: "服务商没有返回图片" };
+  }
+
+  // Poll every job each round, so N pictures cost one wait rather than N. Bounded at ~150s so a
+  // stuck job cannot hold the request open forever.
+  for (let attempt = 0; attempt < 60 && waiting.size; attempt++) {
+    await sleep(2_500);
+    stage?.(attempt === 0 ? "queued" : "running");
+    for (const taskId of [...waiting]) {
+      let poll: Response;
+      try {
+        poll = await fetch(`${base}/tasks/${taskId}`, {
+          headers: { authorization: `Bearer ${key}` },
+          signal: AbortSignal.timeout(20_000),
+        });
+      } catch (error) {
+        return { ok: false, error: `轮询失败：${(error as Error).message}` };
+      }
+      const pollText = await poll.text();
+      let state: any;
+      try {
+        state = JSON.parse(pollText);
+      } catch {
+        return { ok: false, error: `无法解析轮询响应：${pollText.slice(0, 200)}` };
+      }
+      const status = String(state?.output?.task_status ?? state?.task_status ?? "").toUpperCase();
+      if (status === "SUCCEEDED") {
+        const got = collectDashscopeImages(state);
+        if (!got.length) return { ok: false, error: `任务成功但没有图片：${pollText.slice(0, 200)}` };
+        images.push(...got);
+        waiting.delete(taskId);
+      } else if (status === "FAILED" || status === "CANCELED" || status === "UNKNOWN") {
+        return { ok: false, error: `任务未完成（${status}）：${pollText.slice(0, 300)}` };
+      }
     }
   }
-  return { ok: false, error: "等待超时（约 2.5 分钟）：任务可能还在排队，稍后再试一次" };
+  if (waiting.size) {
+    return { ok: false, error: `等待超时（约 2.5 分钟）：还有 ${waiting.size} 张在排队，稍后再试一次` };
+  }
+  return { ok: true, images };
 }
 
 /** Image urls out of either DashScope reply shape: `output.results[]` or the messages style. */

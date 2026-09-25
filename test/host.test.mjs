@@ -413,6 +413,41 @@ console.log("== ai accent: dashscope (submit + poll) ==");
   globalThis.fetch = realFetch;
 }
 
+console.log("== ai accent: count means independent jobs ==");
+{
+  // "2 张" has to mean two separate jobs: one request carrying n=2 comes back as the same picture
+  // twice on more than one service, and DashScope does not document `n` at all.
+  const calls = [];
+  let seq = 0;
+  globalThis.fetch = async (url, init) => {
+    const u = String(url);
+    calls.push({ url: u, init });
+    if (u.endsWith("/services/aigc/text2image/image-synthesis")) {
+      return new Response(JSON.stringify({ output: { task_id: `t-${++seq}`, task_status: "PENDING" } }), { status: 200 });
+    }
+    const taskId = /\/tasks\/(t-\d+)$/.exec(u)?.[1];
+    if (taskId) {
+      return new Response(
+        JSON.stringify({ output: { task_id: taskId, task_status: "SUCCEEDED", results: [{ url: `http://127.0.0.1:9/${taskId}.png` }] } }),
+        { status: 200 },
+      );
+    }
+    return new Response(Buffer.from(PNG, "base64"), { status: 200, headers: { "content-type": "image/png" } });
+  };
+  const r = await call(
+    "POST",
+    "/dsh-image-skin/gen",
+    JSON.stringify({ providerId: "dashscope-wanx", apiKey: "k", prompt: "border", count: 2 }),
+  );
+  const body = json(r);
+  const submits = calls.filter((c) => c.url.endsWith("/services/aigc/text2image/image-synthesis"));
+  check("count=2 -> two submissions", submits.length === 2, String(submits.length));
+  check("count=2 -> two stored images", r.status === 200 && body?.urls?.length === 2, `${r.status} ${r.body}`);
+  const sent = JSON.parse(submits[0]?.init?.body ?? "{}");
+  check("count no longer rides on n", sent?.parameters?.n === undefined, JSON.stringify(sent));
+  globalThis.fetch = realFetch;
+}
+
 console.log("== ai accent: key probe + streaming ==");
 {
   globalThis.fetch = async (url) => {
