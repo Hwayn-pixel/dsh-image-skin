@@ -715,6 +715,8 @@ const ACCENT_SELECTOR = [
 const ACCENT_EXCLUDE = `[data-dsh-skin-chrome],[data-dsh-skin-chrome] *,[data-dsh-skin-sticker],[data-dsh-skin-sticker] *,a,[role="link"]`;
 
 const paletteCache = new Map<string, string[]>();
+/** Last palette we wrote to settings, so a lagging snapshot cannot make us write it again. */
+let paletteWriteKey: string | null = null;
 let accentTargets: HTMLElement[] = [];
 
 /**
@@ -1159,9 +1161,18 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit): Promi
 
   // Hand the sampled colours to the AI half: without them the generation prompt could only say
   // "colours sampled from the wallpaper", which an image model has no way of seeing. Written
-  // back through settings so the AI screen sends them, and idempotent so this cannot loop.
+  // back through settings so the AI screen sends them.
+  //
+  // Guarded by a local marker *and* by the stored value, because a write makes the snapshot
+  // stale for a moment: without this, each setting change re-entered here, saw the old stored
+  // value, and wrote again - a write loop that re-rendered the whole settings panel several times
+  // a second and swallowed every click and drag inside it (2026-09-25, "点击不了/拖不动").
   const joined = palette.join("|");
-  if (commit && String(value.accentPalette ?? "") !== joined) void commit({ accentPalette: joined });
+  const writeKey = `${wallpaper}|${joined}`;
+  if (commit && paletteWriteKey !== writeKey && String(value.accentPalette ?? "") !== joined) {
+    paletteWriteKey = writeKey;
+    void commit({ accentPalette: joined });
+  }
 
   accentTargets = scanAccentTargets();
   accentTargets.forEach((el) => el.setAttribute(ACCENT_MARK, accentRole(el)));
@@ -2303,6 +2314,15 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
     const [notice, setNotice] = React.useState<string | null>(null);
     const [gcStatus, setGcStatus] = React.useState<string | null>(null);
 
+    // Every write to the host goes through here. A tab opened before a DSH restart keeps rendering
+    // and keeps accepting clicks, but its token is dead - so writes fail and every control looks
+    // broken ("点上去没反应"). Say so on screen instead of leaving a dead UI behind.
+    const writeFailedNotice =
+      "写不进去：这个页面和 DSH 的连接已经断了（我重启过服务的话就会这样）。请刷新页面，或用最新打开的那个标签。";
+    const apply = (field: string, value: unknown): void => {
+      void scope.set(field, value).catch(() => setNotice(writeFailedNotice));
+    };
+
     const upload = async (field: string, file: File) => {
       setNotice(null);
       if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
@@ -2349,7 +2369,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       editing: editingId === area.id,
       tip: area.id === "window" && configuredAreas === 0,
       onPick: (file: File, field: string) => void upload(field, file),
-      onSet: (field: string, val: unknown) => void scope.set(field, val),
+      onSet: (field: string, val: unknown) => apply(field, val),
       onClear: (field: string) => {
         void (async () => {
           await scope.set(field, "");
@@ -2539,7 +2559,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
               className: "dshImgSkin-modalDismiss",
               type: "button",
               onClick: () => {
-                void scope.set("accentRiskHidden", true);
+                apply("accentRiskHidden", true);
                 setRiskOpen(false);
               },
             },
@@ -2646,7 +2666,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           step: 1,
           format: (n: number) => `${n}%`,
           onPreview: (n: number) => applyPanelOpacity({ ...v, panelOpacity: n }, mode),
-          onCommit: (n: number) => void scope.set("panelOpacity", n),
+          onCommit: (n: number) => apply("panelOpacity", n),
         }),
         h(SliderRow, {
           key: "rate",
@@ -2658,7 +2678,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           step: 0.25,
           format: (n: number) => `${n}×`,
           onPreview: (n: number) => previewVideoRate(n),
-          onCommit: (n: number) => void scope.set("videoPlaybackRate", n),
+          onCommit: (n: number) => apply("videoPlaybackRate", n),
         }),
       ),
       h(
@@ -2719,8 +2739,8 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           key: "accent",
           level: Number(v.accentLevel ?? 0),
           enabled: v.accentEnabled !== false,
-          onChange: (n: number) => void scope.set("accentLevel", n),
-          onToggle: (on: boolean) => void scope.set("accentEnabled", on),
+          onChange: (n: number) => apply("accentLevel", n),
+          onToggle: (on: boolean) => apply("accentEnabled", on),
         }),
         // Show what the scheme is built from. The sampler returns wallpaper colours; the CSS turns
         // them into one hue with three roles, so showing the raw four is an honest preview of the
@@ -2744,7 +2764,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       h(AiAccentPanel, {
         value: v,
         strength: Math.max(1, Number(v.accentLevel ?? 1)),
-        onSet: (field: string, val: unknown) => void scope.set(field, val),
+        onSet: (field: string, val: unknown) => apply(field, val),
       }),
       riskOpen ? riskModal : null,
     );
