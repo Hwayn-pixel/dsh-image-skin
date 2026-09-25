@@ -1198,10 +1198,23 @@ interface AccentScheme {
   edge: string;
   /** True when the second hue really came from the picture. */
   edgeFromArtwork: boolean;
+  /**
+   * 层次感: the tone ramp. One hue, five rungs - window, panel, raised control, hover, pressed -
+   * so the interface has depth instead of being one flat tint. Surfaces only whisper the hue;
+   * the accent is the one rung that carries it properly.
+   */
+  appTone: string;
+  panelTone: string;
+  raisedTone: string;
+  raisedHi: string;
+  raisedDown: string;
+  accent: string;
+  /** Text colour to use *on* the accent rung (the only text colour we touch). */
+  accentInk: string;
 }
 
 /** One hue in, a whole scheme out: three roles, contrast-checked against the surface. */
-function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["light"]): AccentScheme {
+function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["light"], depth = 2): AccentScheme {
   const sampled = palette
     .slice(0, 6)
     .map((p) => {
@@ -1251,9 +1264,31 @@ function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["lig
   const vivid = vividPick ?? sampled.find((c) => c.rank > 0.04) ?? sampled[0];
   const sparkL = fitLightness(vivid?.h ?? hue, Math.min(0.85, (vivid?.s ?? sat) + 0.15), mode === "dark" ? 0.78 : 0.44, bgLum, 3.4, mode === "dark");
 
+  // ── 层次感: the tone ladder ────────────────────────────────────────────────────────────────
+  // The rung height scales with depth, so the same ladder reads as a whisper at 0 and as a clearly
+  // stepped surface at 4. Surfaces get low chroma (a coloured *paper* UI is what looks cheap); the
+  // accent gets the full saturation and is contrast-walked, because it has to carry its own text.
+  const dark = mode === "dark";
+  const rung = [0.014, 0.024, 0.034, 0.044, 0.054][Math.max(0, Math.min(4, depth))] ?? 0.034;
+  const baseL = dark ? 0.155 : 0.972;
+  const toneAt = (i: number, chroma: number): string => {
+    const l = dark ? baseL + rung * i : baseL - rung * i;
+    return hslTriple(hue, Math.min(0.5, sat * chroma), Math.max(0.045, Math.min(0.985, l))).join(", ");
+  };
+  const accentL = fitLightness(hue, Math.min(0.74, sat + 0.1), dark ? 0.56 : 0.5, bgLum, 3.4, dark);
+  const accentRgb = hslTriple(hue, Math.min(0.74, sat + 0.1), accentL);
+  const accentInk = relativeLuminance(accentRgb[0], accentRgb[1], accentRgb[2]) > 0.34 ? "16, 20, 28" : "250, 252, 255";
+
   return {
     hue,
     sat,
+    appTone: toneAt(0, 0.18),
+    panelTone: toneAt(2, 0.22),
+    raisedTone: toneAt(3, 0.26),
+    raisedHi: toneAt(4, 0.30),
+    raisedDown: toneAt(1, 0.20),
+    accent: accentRgb.join(", "),
+    accentInk,
     line: hslTriple(hue, sat, lineL).join(", "),
     ink: hslTriple(hue, Math.min(0.72, sat + 0.12), inkL).join(", "),
     wash: hslTriple(hue, Math.min(0.75, sat + 0.14), washL).join(", "),
@@ -1432,17 +1467,20 @@ function accentCss(
   frame: FrameOptions = { scale: 1, opacity: 1, controls: false },
   colourStyle: ColourStyle = "wash",
 ): string {
-  const scheme = deriveScheme(palette, mode, reading?.light);
+  const scheme = deriveScheme(palette, mode, reading?.light, level);
   const root = `body[${BODY_ATTR}][${ACCENT_ATTR}]`;
   const small = `${root} [${ACCENT_MARK}="small"]`;
   const panel = `${root} [${ACCENT_MARK}="panel"]`;
   const both = `${small}, ${panel}`;
-  const { line, ink, wash, lightTint, spark, edge } = scheme;
+  const { line, ink, wash, lightTint, spark, edge, panelTone, raisedTone, raisedHi, raisedDown, accent, accentInk } = scheme;
   // 只染三处: with the surface neutral, the glass itself carries the picture's colour and we only
   // mark what is interactive - which is also what stops the UI looking like every wallpaper theme.
   const neutralWash = mode === "dark" ? "10,14,22" : "255,255,255";
   const neutralInk = mode === "dark" ? "236,243,255" : "20,26,38";
-  const surface = colourStyle === "marks" ? neutralWash : wash;
+  // marks keeps the surfaces neutral (the glass carries the colour); wash and duo paint the ladder.
+  const painting = colourStyle !== "marks";
+  const panelFill = painting ? panelTone : neutralWash;
+  const controlFill = painting ? raisedTone : neutralWash;
   const signal = colourStyle === "duo" ? edge : spark;
   // A thin wash of light in every mode - this is 借光, not a colour stain, so even the neutral mode
   // keeps it. Card: only the marks mode leans on it on its own.
@@ -1458,7 +1496,10 @@ function accentCss(
   // a control's existing box-shadow, and `:not(:focus-visible)` keeps DSH's focus ring intact.
   // Softened: a full-strength hairline everywhere read as "disabled outline" rather than design. -1px
   // offset keeps it hugging the shape.
-  const tint = [0.08, 0.11, 0.14, 0.16, 0.18][level] ?? 0.08;
+  // How much of the wallpaper the surfaces cover, per rung. Level 0 is a whisper (the hairline is
+  // the visible thing); by 4 the ladder is at its most solid. Depth comes from the *steps between*
+  // rungs - this knob only decides how much picture stays visible underneath.
+  const cover = [0.06, 0.34, 0.52, 0.64, 0.72][level] ?? 0.06;
   const alpha = [0.22, 0.28, 0.33, 0.38, 0.43][level] ?? 0.22;
   const hairline = (sel: string) =>
     `${sel}:not(:focus-visible) {\n  outline: 1px solid rgba(${line}, ${alpha}) !important;\n  outline-offset: -1px !important;\n}`;
@@ -1471,14 +1512,20 @@ function accentCss(
   const fromLeft = (reading?.light.dirX ?? -1) <= 0;
   const toDark = `${fromTop ? "bottom" : "top"} ${fromLeft ? "right" : "left"}`;
   const litEdge = fromTop ? "inset 0 1px 0" : "inset 0 -1px 0";
+  // Panels sit *below* controls on the ladder, and each rung keeps the picture's light on top of its
+  // tone - that is where the layering comes from: two knobs (tone and cover) moving together.
   lines.push(
-    `${both} {`,
-    `  background-color: rgba(${surface}, ${tint}) !important;`,
-    `  background-image: ${surfaceGradient(toDark, tint)} !important;`,
-    `  box-shadow: ${litEdge} rgba(${lightTint}, .32) !important;`,
-    // 呼吸 (breathing): recolours arrive slowly from the breathing pass; let the paint catch up
-    // instead of snapping.
-    `  transition: background-color 4s ease, border-color 4s ease, outline-color 4s ease !important;`,
+    `${panel} {`,
+    `  background-color: rgba(${panelFill}, ${(cover * 0.92).toFixed(3)}) !important;`,
+    `  background-image: ${surfaceGradient(toDark, cover * 0.2)} !important;`,
+    `  box-shadow: ${litEdge} rgba(${lightTint}, .30) !important;`,
+    `  transition: background-color 4s ease, outline-color 4s ease, box-shadow 4s ease !important;`,
+    `}`,
+    `${small} {`,
+    `  background-color: rgba(${controlFill}, ${cover.toFixed(3)}) !important;`,
+    `  background-image: ${surfaceGradient(toDark, cover * 0.24)} !important;`,
+    `  box-shadow: ${litEdge} rgba(${lightTint}, .22) !important;`,
+    `  transition: background-color .18s ease, filter .18s ease, transform .18s ease, outline-color .18s ease !important;`,
     `}`,
   );
   // 让位 (yield): where the picture is busy, decoration steps back - less tint, no gradient, no
@@ -1486,7 +1533,7 @@ function accentCss(
   // the fix for ornaments fighting the subject.
   lines.push(
     `${root} [${ACCENT_MARK}][data-dsh-skin-busy="1"] {`,
-    `  background-color: rgba(${wash}, ${(tint * 0.5).toFixed(3)}) !important;`,
+    `  background-color: rgba(${neutralWash}, ${(cover * 0.22).toFixed(3)}) !important;`,
     `  background-image: none !important;`,
     `  border-image-source: none !important;`,
     `  outline-color: rgba(${line}, ${(alpha * 0.45).toFixed(3)}) !important;`,
@@ -1506,17 +1553,26 @@ function accentCss(
   // Controls get a little craft without touching their own background or shadow: a hover that lifts a
   // pixel and warms very slightly, a press that settles back, and the picture's spark on the edge.
   // (Box-shadow and border are left alone deliberately - DSH's own button styles stay intact.)
+  // A control climbs one rung on hover and drops one when pressed - the smallest possible amount of
+  // motion that still feels physical.
   lines.push(
-    `${small} {`,
-    `  transition: filter .18s ease, transform .18s ease, outline-color .18s ease, background-color 4s ease !important;`,
-    `}`,
     `${small}:hover:not(:disabled) {`,
-    `  filter: brightness(1.06) saturate(1.06) !important;`,
+    `  background-color: rgba(${painting ? raisedHi : neutralWash}, ${Math.min(0.9, cover + 0.12).toFixed(3)}) !important;`,
+    `  filter: brightness(1.04) !important;`,
     `  transform: translateY(-1px);`,
     `}`,
     `${small}:active:not(:disabled) {`,
-    `  filter: brightness(.97) !important;`,
+    `  background-color: rgba(${painting ? raisedDown : neutralWash}, ${Math.max(0.18, cover - 0.1).toFixed(3)}) !important;`,
     `  transform: translateY(0);`,
+    `}`,
+    // The accent rung: a selected tab / pressed toggle / active item takes the picture's colour for
+    // real, which is the one place a text colour has to be chosen for it.
+    `${root} [${ACCENT_MARK}][aria-pressed="true"], ${root} [${ACCENT_MARK}][aria-selected="true"], ${root} [${ACCENT_MARK}][data-on="true"], ${root} [${ACCENT_MARK}][data-active="true"] {`,
+    `  background-color: rgba(${accent}, .78) !important;`,
+    `  background-image: none !important;`,
+    `  color: rgb(${accentInk}) !important;`,
+    `  outline-color: rgba(${accent}, .95) !important;`,
+    `  border-color: rgba(${accent}, .9) !important;`,
     `}`,
   );
   if (colourStyle !== "marks") lines.push(hairline(`${small}:not([data-dsh-skin-busy="1"])`));
