@@ -1164,39 +1164,115 @@ function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["lig
  * corners, `bracket` adds the hairline and a few edge figures, `rich` doubles the rule. None of
  * them ever paint the middle, so the tinted surface stays visible underneath.
  */
-function frameDataUri(corner: string, edge: string, variant: "tick" | "bracket" | "rich"): string {
+/**
+ * Local ornament art, drawn as SVG.
+ *
+ * Two rules taken from how border-image ornaments are actually built:
+ *   1. the source must be square and the corner slices square, or the corners come out smeared;
+ *   2. edges must be a *repeatable unit* - `stretch` turns any edge motif into a straight line, which
+ *      is exactly what "这个不像纹样" looks like. Hence the CSS says `round` for this art.
+ *
+ * The four variants are the ladder: a tick, a bracket, a rich rail with scrolls, and an ornate frame
+ * with a rosette petal and a scaled edge in each corner.
+ */
+function frameDataUri(corner: string, edge: string, variant: "tick" | "bracket" | "rich" | "ornate"): string {
   const S = 96;
+  const SL = 26; // square corner region
+  const rich = variant === "rich" || variant === "ornate";
+  const ornate = variant === "ornate";
   const parts: string[] = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">`,
     `<g fill="none" stroke-linecap="round" stroke-linejoin="round">`,
   ];
   if (variant !== "tick") {
-    parts.push(`<rect x="1" y="1" width="${S - 2}" height="${S - 2}" rx="15" stroke="${edge}" stroke-width="1.4"/>`);
+    parts.push(`<rect x="2" y="2" width="${S - 4}" height="${S - 4}" rx="18" stroke="${edge}" stroke-width="1.3" opacity=".9"/>`);
   }
-  if (variant === "rich") {
-    parts.push(`<rect x="6.5" y="6.5" width="${S - 13}" height="${S - 13}" rx="11" stroke="${edge}" stroke-width="0.7" opacity=".55"/>`);
+  if (rich) {
+    parts.push(`<rect x="8" y="8" width="${S - 16}" height="${S - 16}" rx="14" stroke="${edge}" stroke-width=".6" opacity=".4"/>`);
   }
-  // Corner brackets: an L that draws the eye to the corner. This is the cue that reads as
-  // "tailored" rather than "outlined", and it is cheap at any size.
-  const L = variant === "rich" ? 24 : 18;
-  for (const [x, y, dx, dy] of [
-    [13, 13, 1, 1],
-    [S - 13, 13, -1, 1],
-    [13, S - 13, 1, -1],
-    [S - 13, S - 13, -1, -1],
-  ]) {
-    parts.push(
-      `<path d="M ${x} ${y + dy * L} L ${x} ${y} L ${x + dx * L} ${y}" stroke="${corner}" stroke-width="${variant === "tick" ? 2 : 2.4}"/>`,
+
+  // The corner design is drawn once in the top-left orientation and placed four times with
+  // transforms - mirroring by hand is how corners end up subtly different from each other.
+  // The corner design is drawn once in the top-left orientation and placed four times with
+  // transforms - mirroring by hand is how corners end up subtly different from each other.
+  //
+  // Placement note: DSH's panels carry a border-radius (32px on the settings dialog) which is wider
+  // than this frame's painted band, and Chromium clips the border image to the rounded box. A motif
+  // hugging the source's outer corner therefore gets shaved off. So the corner ornament sits toward
+  // the *inner* corner of the tile, where the arc leaves it alone.
+  const cornerArt: string[] = [
+    `<path d="M 6 ${SL - 2} C 13 ${SL - 6}, 19 19, ${SL - 2} 6" stroke="${edge}" stroke-width="1.3" opacity=".9"/>`,
+    `<circle cx="21" cy="21" r="4.6" stroke="${corner}" stroke-width="1.6" fill="none"/>`,
+    `<circle cx="21" cy="21" r="1.9" fill="${corner}" stroke="none"/>`,
+    `<path d="M 21 13.6 c 2.4 2 2.4 5 0 7.4 c -2.4 -2.4 -2.4 -5.4 0 -7.4" stroke="${edge}" stroke-width="1.1" opacity=".85"/>`,
+    `<path d="M 13.6 21 c 2 2.4 5 2.4 7.4 0 c -2.4 -2.4 -5.4 -2.4 -7.4 0" stroke="${edge}" stroke-width="1.1" opacity=".85"/>`,
+  ];
+  if (ornate) {
+    cornerArt.push(
+      `<circle cx="21" cy="21" r="7.4" stroke="${edge}" stroke-width=".8" opacity=".55" fill="none"/>`,
+      `<path d="M 15 15 l 3 3 l -3 3 l -3 -3 z" fill="${corner}" stroke="none"/>`,
+      `<circle cx="9" cy="9" r="2.1" fill="${edge}" opacity=".8" stroke="none"/>`,
     );
-    parts.push(`<circle cx="${x + dx * 8}" cy="${y + dy * 8}" r="${variant === "tick" ? 1.6 : 2.1}" fill="${corner}" stroke="none"/>`);
   }
-  if (variant !== "tick") {
-    // A quiet repeating figure along the edges: one small lozenge per tile.
-    const step = variant === "rich" ? 12 : 16;
-    for (let i = 40; i <= S - 40; i += step) {
-      parts.push(`<path d="M ${i} 1.6 l 4.4 4.4 l -4.4 4.4 l -4.4 -4.4 z" fill="${edge}" opacity=".85" stroke="none"/>`);
-      parts.push(`<path d="M 1.6 ${i} l 4.4 4.4 l -4.4 4.4 l -4.4 -4.4 z" fill="${edge}" opacity=".85" stroke="none"/>`);
+  const placed = cornerArt.join("");
+  parts.push(`<g>${placed}</g>`);
+  parts.push(`<g transform="translate(${S} 0) scale(-1 1)">${placed}</g>`);
+  parts.push(`<g transform="translate(0 ${S}) scale(1 -1)">${placed}</g>`);
+  parts.push(`<g transform="translate(${S} ${S}) scale(-1 -1)">${placed}</g>`);
+
+  // Edge bands: a bead chain, and for the ornate variant a scalloped lace underneath it. Both are
+  // laid out on a period that divides the band evenly, so tiling cannot produce a seam.
+  // Edge bands. Each band is `band` long (it tiles along the length) and SL thick, so its motifs must
+  // sit *inside* the thickness - drawing them at the source's midline would put them in the middle
+  // slice, which border-image throws away. Hence outer=rail from the rects, centre=bead chain,
+  // inner=lace. Everything is on a period that divides the band evenly, so tiling cannot seam.
+  const band = S - SL * 2; // 44
+  const step = band / 4;
+  const outer = SL / 2; // ~13: the middle of the band's thickness
+  for (let k = 0; k < 4; k++) {
+    const x = SL + step / 2 + step * k;
+    const r = ornate ? 3 : 2.4;
+    parts.push(`<circle cx="${x}" cy="${outer}" r="${r}" fill="${edge}" stroke="none"/>`);
+    parts.push(`<circle cx="${outer}" cy="${x}" r="${r}" fill="${edge}" stroke="none"/>`);
+    if (ornate) {
+      parts.push(`<path d="M ${x} ${SL - 5} l 2.6 2.6 l -2.6 2.6 l -2.6 -2.6 z" fill="${corner}" stroke="none"/>`);
+      parts.push(`<path d="M ${SL - 5} ${x} l 2.6 2.6 l -2.6 2.6 l -2.6 -2.6 z" fill="${corner}" stroke="none"/>`);
+    } else if (rich) {
+      parts.push(`<path d="M ${x - step / 2 + 1.5} ${SL - 3} q ${step / 2 - 1.5} -6 ${step - 3} 0" stroke="${edge}" stroke-width=".8" opacity=".5"/>`);
+      parts.push(`<path d="M ${SL - 3} ${x - step / 2 + 1.5} q -6 ${step / 2 - 1.5} 0 ${step - 3}" stroke="${edge}" stroke-width=".8" opacity=".5"/>`);
     }
+  }
+  parts.push(`</g></svg>`);
+  return `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(parts.join(""))}")`;
+}
+
+/**
+ * A very small ortament for controls: one bold curl per corner plus a bead chain, drawn so it still
+ * reads when it is painted only a few pixels thick. Painted through border-image, so it costs no
+ * layout and cannot displace a neighbour.
+ */
+function cornerOrnamentDataUri(corner: string, edge: string): string {
+  const S = 48;
+  const SL = 14;
+  const parts: string[] = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">`,
+    `<g fill="none" stroke-linecap="round" stroke-linejoin="round">`,
+  ];
+  const cornerArt = [
+    `<path d="M 0 ${SL - 4} C 0 4, 4 0, ${SL - 4} 0" stroke="${corner}" stroke-width="2.6"/>`,
+    `<path d="M 2.5 ${SL - 2} C 7 ${SL - 3}, 11 7, 11.5 2.5" stroke="${edge}" stroke-width="1.1" opacity=".85"/>`,
+    `<circle cx="5" cy="5" r="2" fill="${corner}" stroke="none"/>`,
+  ].join("");
+  parts.push(`<g>${cornerArt}</g>`);
+  parts.push(`<g transform="translate(${S} 0) scale(-1 1)">${cornerArt}</g>`);
+  parts.push(`<g transform="translate(0 ${S}) scale(1 -1)">${cornerArt}</g>`);
+  parts.push(`<g transform="translate(${S} ${S}) scale(-1 -1)">${cornerArt}</g>`);
+  const band = S - SL * 2;
+  const mid = SL + band / 2;
+  for (let k = 0; k < 2; k++) {
+    const x = SL + band / 4 + (band / 2) * k;
+    parts.push(`<circle cx="${x}" cy="${mid}" r="1.4" fill="${edge}" stroke="none"/>`);
+    parts.push(`<circle cx="${mid}" cy="${x}" r="1.4" fill="${edge}" stroke="none"/>`);
   }
   parts.push(`</g></svg>`);
   return `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(parts.join(""))}")`;
@@ -1298,20 +1374,24 @@ function accentCss(
     return lines.join("\n");
   }
 
-  // From level 1 the *panels* wear a frame. Controls never do by default: a frame squashed into a
-  // 30px button is where "decorated" turns into "cheap", and the hairline is what makes a control
-  // look like a control. (`frame.controls` is the opt-in for people who want it anyway.)
-  const art =
-    chosenFrame && level >= 1
-      ? `url("${chosenFrame}")`
-      : frameDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`, level >= 2 ? "bracket" : "tick");
+  // From level 1 the *panels* wear a frame. Controls only join at the top level (or by opt-in): a
+  // frame squashed into a 30px button is where "decorated" turns into "cheap", and the hairline is
+  // what makes a control look like a control.
+  const usingArt = Boolean(chosenFrame) && level >= 1;
+  const variant = level >= 4 ? "ornate" : level >= 3 ? "rich" : level >= 2 ? "bracket" : "tick";
+  const art = usingArt
+    ? `url("${chosenFrame}")`
+    : frameDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`, variant);
   // The frame is a fixed number of pixels per side, so a panel needs more of them than it looks:
   // a 9px frame on an 800px dialog scales its corner motif down to two pixels and vanishes. The
   // generated art is heavier per pixel, so it gets less width - at 18px it started covering the
   // dialog's own title row. `frame.scale` lets the user trim it to the panel at hand.
-  const baseWidth = chosenFrame && level >= 1 ? 14 : level >= 2 ? 12 : 8;
+  const baseWidth = usingArt ? 14 : level >= 4 ? 22 : level >= 3 ? 18 : level >= 2 ? 12 : 8;
   const width = Math.max(3, Math.round(baseWidth * frame.scale));
-  const slice = chosenFrame && level >= 1 ? 30 : 22;
+  const slice = usingArt ? 30 : 26;
+  // `stretch` smears an edge motif into a straight line - the local art is built to tile, so it asks
+  // for `round`; a generated frame is one whole frame image, which is meant to be stretched.
+  const repeat = usingArt ? "stretch" : "round";
   lines.push(
     `${panel} {`,
     `  border: 1px solid transparent !important;`,
@@ -1319,18 +1399,20 @@ function accentCss(
     `  border-image-slice: ${slice} !important;`,
     `  border-image-width: ${width}px !important;`,
     `  border-image-outset: 2px !important;`,
-    `  border-image-repeat: stretch !important;`,
+    `  border-image-repeat: ${repeat} !important;`,
     `}`,
   );
-  if (chosenFrame && frame.controls) {
+  const dressControls = usingArt ? frame.controls : level >= 4 || frame.controls;
+  if (dressControls) {
+    const controlArt = usingArt ? art : cornerOrnamentDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`);
     lines.push(
       `${small} {`,
       `  border: 1px solid transparent !important;`,
-      `  border-image-source: ${art} !important;`,
-      `  border-image-slice: ${slice} !important;`,
-      `  border-image-width: ${Math.max(2, Math.round(6 * frame.scale))}px !important;`,
+      `  border-image-source: ${controlArt} !important;`,
+      `  border-image-slice: ${usingArt ? slice : 14} !important;`,
+      `  border-image-width: ${Math.max(2, Math.round((usingArt ? 6 : 5) * frame.scale))}px !important;`,
       `  border-image-outset: 1px !important;`,
-      `  border-image-repeat: stretch !important;`,
+      `  border-image-repeat: ${repeat} !important;`,
       `}`,
     );
   }
@@ -3358,7 +3440,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
                     checked: v.accentFrameControls === true,
                     onChange: (e: any) => apply("accentFrameControls", e.target.checked),
                   }),
-                  "也用在按钮/输入框上",
+                  "也用在按钮/输入框上（最高档默认开）",
                 ),
               ),
             )

@@ -126,10 +126,12 @@ const STRENGTHS = [
 ];
 
 const GEN_SUBJECT = [
-  "seamless decorative border pattern",
-  "flat vector ornament",
-  "perfectly symmetrical corners",
-  "uniform repeating edges",
+  "a decorative border ornament drawn as a square frame",
+  "ornate corner flourishes are the focus of all four corners",
+  "the four edges carry a fine repeating motif that tiles seamlessly",
+  "the centre of the frame stays empty",
+  "flat vector ornament, symmetrical, crisp clean linework",
+  "transparent background (PNG with alpha), nothing drawn behind the ornament",
   "no text", "no letters", "no numbers", "no people", "no animals", "no faces",
   "no scenery", "no objects", "no watermark", "no signature",
 ].join(", ");
