@@ -216,6 +216,24 @@ function ensureBaseStyles(): void {
     ".dshImgSkin-modalDismiss{cursor:pointer;border:0;background:transparent;color:inherit;font:inherit;font-size:12px;",
     "opacity:.55;padding:2px 6px;text-decoration:underline;text-underline-offset:3px}",
     ".dshImgSkin-modalDismiss:hover{opacity:.9}",
+
+    // ── round two: readable surfaces, a sticky way back, and entry state ────
+    // The panel-opacity slider makes DSH's own tokens translucent - that is the point out in the
+    // app, but inside these screens it turned every card into frosted glass over a wallpaper, and
+    // the settings page became the hardest page to read in the product. `--dsh-img-skin-surface`
+    // is an opaque colour of the current scheme, so our own screen stays legible.
+    ".dshImgSkin-card,.dshImgSkin-entry,.dshImgSkin-area,.dshImgSkin-tipCard{",
+    "background-color:var(--dsh-img-skin-surface,var(--dsw-alias-bg-layer-1,transparent))}",
+    ".dshImgSkin-nav{position:sticky;top:-1px;z-index:6;",
+    "background-color:var(--dsh-img-skin-surface,var(--dsw-alias-bg-layer-1,transparent));",
+    "box-shadow:0 1px 0 var(--dsw-alias-border-l1,rgba(128,128,128,.16))}",
+    ".dshImgSkin-chev{font-size:17px;line-height:1;opacity:.32}",
+    ".dshImgSkin-entry[data-ready='true']:hover .dshImgSkin-chev{opacity:.65}",
+    ".dshImgSkin-entryStatus{font-size:11.5px;line-height:1.6;opacity:.8}",
+    ".dshImgSkin-tag[data-kind='count']{margin-left:6px;opacity:.6}",
+    ".dshImgSkin-tag[data-kind='tip']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);",
+    "color:var(--dsw-alias-brand-primary,#5aa7d8);opacity:1;margin-left:6px}",
+    ".dshImgSkin-tipTitle{font-size:12.5px;font-weight:600}",
     ".dshImgSkin-field{display:grid;grid-template-columns:78px minmax(0,1fr);gap:6px 10px;align-items:start}",
     ".dshImgSkin-fieldLabel{font-size:12px;opacity:.68;padding-top:6px}",
     ".dshImgSkin-fieldBody{display:flex;flex-direction:column;gap:4px;min-width:0}",
@@ -597,6 +615,9 @@ function applyPanelOpacity(value: SkinValue, mode: Mode): void {
     // Sticker overlays ride the slider so the skin fades with the panel; the wallpaper
     // itself stays full-strength (see applyWindow).
     `  ${IMG_ALPHA_VAR}: ${a.toFixed(3)};`,
+    // An opaque surface of the current scheme: our own settings screens read this so they stay
+    // legible while the rest of the app goes see-through.
+    `  --dsh-img-skin-surface: rgb(${rgb});`,
     `  --dsw-alias-bg-base: rgba(${rgb}, ${l(0)});`,
     `  --dsw-alias-bg-layer-1: rgba(${rgb}, ${l(0.15)});`,
     `  --dsw-alias-bg-layer-2: rgba(${rgb}, ${l(0.1)});`,
@@ -678,25 +699,54 @@ let accentTargets: HTMLElement[] = [];
 async function extractPalette(url: string): Promise<string[]> {
   const cached = paletteCache.get(url);
   if (cached) return cached;
-  const img = new Image();
-  img.crossOrigin = "anonymous";
-  img.src = url;
-  try {
-    await img.decode();
-  } catch {
-    return [];
-  }
   const w = 64;
-  const h = Math.max(1, Math.round((64 * img.height) / Math.max(1, img.width)));
   const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return [];
-  ctx.drawImage(img, 0, 0, w, h);
+  // A video backdrop never decodes into an <img>, so sample a real frame instead. Without this
+  // the accent silently did nothing at all for anyone using a video wallpaper.
+  if (VIDEO_RE.test(url)) {
+    const video = document.createElement("video");
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    video.src = url;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        video.addEventListener("loadeddata", () => resolve(), { once: true });
+        video.addEventListener("error", () => reject(new Error("video failed")), { once: true });
+        setTimeout(() => reject(new Error("video timed out")), 5000);
+      });
+      // Step into the clip: the first frame of a loop is often a fade-in.
+      await new Promise<void>((resolve) => {
+        video.addEventListener("seeked", () => resolve(), { once: true });
+        setTimeout(resolve, 1500);
+        video.currentTime = Math.min(0.5, (Number.isFinite(video.duration) ? video.duration : 1) * 0.1);
+      });
+    } catch {
+      return [];
+    }
+    const h = Math.max(1, Math.round((w * video.videoHeight) / Math.max(1, video.videoWidth)));
+    canvas.width = w;
+    canvas.height = h;
+    ctx.drawImage(video, 0, 0, w, h);
+  } else {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = url;
+    try {
+      await img.decode();
+    } catch {
+      return [];
+    }
+    const h = Math.max(1, Math.round((w * img.height) / Math.max(1, img.width)));
+    canvas.width = w;
+    canvas.height = h;
+    ctx.drawImage(img, 0, 0, w, h);
+  }
   let data: Uint8ClampedArray;
   try {
-    data = ctx.getImageData(0, 0, w, h).data;
+    data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
   } catch {
     return [];                                  // tainted canvas — treat as "no palette"
   }
@@ -903,7 +953,7 @@ function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: st
 }
 
 /** Reflect the configured level + artwork onto the skeleton. */
-async function applyAccent(value: SkinValue, mode: Mode): Promise<void> {
+async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit): Promise<void> {
   let style = document.getElementById(ACCENT_STYLE_ID) as HTMLStyleElement | null;
   const raw = Number(value.accentLevel ?? 0);
   const level = Number.isFinite(raw)
@@ -929,6 +979,12 @@ async function applyAccent(value: SkinValue, mode: Mode): Promise<void> {
     style?.remove();
     return;
   }
+
+  // Hand the sampled colours to the AI half: without them the generation prompt could only say
+  // "colours sampled from the wallpaper", which an image model has no way of seeing. Written
+  // back through settings so the AI screen sends them, and idempotent so this cannot loop.
+  const joined = palette.join("|");
+  if (commit && String(value.accentPalette ?? "") !== joined) void commit({ accentPalette: joined });
 
   accentTargets = scanAccentTargets();
   accentTargets.forEach((el) => el.setAttribute(ACCENT_MARK, ""));
@@ -1209,7 +1265,7 @@ function applyAll(value: SkinValue, editingId: string | null, commit: Commit, mo
   scheduleWarmOtherMode(value, mode);
   // Fire-and-forget: palette extraction awaits an image decode, and nothing on screen should
   // wait for decoration to catch up.
-  void applyAccent(value, mode);
+  void applyAccent(value, mode, commit);
 }
 
 // ── repair pass ─────────────────────────────────────────────────────────────
@@ -1512,6 +1568,7 @@ function AreaRow(props: {
   mode: Mode;
   busyField: string | null;
   editing: boolean;
+  tip: boolean;
   onPick: (file: File, field: string) => void;
   onSet: (field: string, v: unknown) => void;
   onClear: (field: string) => void;
@@ -1576,6 +1633,7 @@ function AreaRow(props: {
         { className: "dshImgSkin-name" },
         area.label,
         h("span", { className: "dshImgSkin-tag", "data-kind": sourceKind }, sourceLabel),
+        props.tip ? h("span", { className: "dshImgSkin-tag", "data-kind": "tip" }, "从这里开始") : null,
       ),
       h("div", { className: "dshImgSkin-src" }, area.hint),
       props.editing ? h("div", { className: "dshImgSkin-src" }, "拖动图片移动位置，拖右下角圆点缩放。") : null,
@@ -1828,7 +1886,7 @@ function AiAccentPanel(props: {
   const promptBody = () => ({
     strength: props.strength,
     style: String(v.accentStyle ?? ""),
-    palette: String(v.accentPalette ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    palette: String(v.accentPalette ?? "").split("|").map((s) => s.trim()).filter(Boolean),
     extra: String(v.accentPromptExtra ?? ""),
   });
 
@@ -2102,6 +2160,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       mode,
       busyField: busy,
       editing: editingId === area.id,
+      tip: area.id === "window" && configuredAreas === 0,
       onPick: (file: File, field: string) => void upload(field, file),
       onSet: (field: string, val: unknown) => void scope.set(field, val),
       onClear: (field: string) => {
@@ -2127,7 +2186,16 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           h(
             "div",
             null,
-            h("span", { className: "dshImgSkin-title" }, title),
+            h(
+              "span",
+              { className: "dshImgSkin-title" },
+              title,
+              h(
+                "span",
+                { className: "dshImgSkin-tag", "data-kind": "count" },
+                `${list.filter((a) => Boolean(v[`${a.id}Image`] || v[`${a.id}ImageLight`] || v[`${a.id}ImageDark`])).length}/${list.length} 已配`,
+              ),
+            ),
             h("p", { className: "dshImgSkin-sub" }, note),
           ),
         ),
@@ -2178,6 +2246,26 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       if (v.accentRiskHidden !== true) setRiskOpen(true);
     }, [page, hasWallpaper, v.accentRiskHidden]);
 
+    // The notice is a dialog, so Escape has to close it like one.
+    React.useEffect(() => {
+      if (!riskOpen) return;
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === "Escape") setRiskOpen(false);
+      };
+      window.addEventListener("keydown", onKey);
+      return () => window.removeEventListener("keydown", onKey);
+    }, [riskOpen]);
+
+    // How much is set up, in the currency the user thinks in: areas.
+    const configuredAreas = AREAS.filter((a) =>
+      Boolean(v[`${a.id}Image`] || v[`${a.id}ImageLight`] || v[`${a.id}ImageDark`]),
+    ).length;
+    const accentIndex = Math.max(0, Math.min(ACCENT_LEVELS.length - 1, Math.round(Number(v.accentLevel ?? 0))));
+    const aiStatus =
+      v.accentEnabled === false
+        ? "装饰未开启"
+        : `档位 ${accentIndex} · ${ACCENT_LEVELS[accentIndex]?.name ?? "取色"}${v.accentFrame ? " · 已应用生成图" : ""}`;
+
     const back = (title: string) =>
       h(
         "div",
@@ -2186,7 +2274,14 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
         h("span", { className: "dshImgSkin-navTitle" }, title),
       );
 
-    const entry = (target: "images" | "ai", title: string, sub: string, locked: boolean, lockedHint?: string) =>
+    const entry = (
+      target: "images" | "ai",
+      title: string,
+      sub: string,
+      status: string,
+      locked: boolean,
+      lockedHint?: string,
+    ) =>
       h(
         "button",
         {
@@ -2194,6 +2289,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           type: "button",
           className: "dshImgSkin-entry",
           disabled: locked,
+          "data-ready": String(!locked),
           onClick: () => {
             if (!locked) setPage(target);
           },
@@ -2202,8 +2298,9 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           "span",
           { className: "dshImgSkin-entryTop" },
           h("span", { className: "dshImgSkin-entryTitle" }, title),
-          h("span", { className: "dshImgSkin-entryGo" }, locked ? "🔒 需要壁纸" : "进入 →"),
+          h("span", { className: "dshImgSkin-chev" }, locked ? "🔒" : "›"),
         ),
+        h("span", { className: "dshImgSkin-entryStatus" }, status),
         h("span", { className: "dshImgSkin-entrySub" }, sub),
         locked && lockedHint ? h("span", { className: "dshImgSkin-lock" }, lockedHint) : null,
       );
@@ -2254,7 +2351,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
 
     const home = h(
       "div",
-      { className: "dshImgSkin-shell" },
+      { className: "dshImgSkin-shell", "data-dsh-skin-chrome": "settings" },
       h(
         "p",
         { className: "dshImgSkin-intro" },
@@ -2263,11 +2360,18 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       h(
         "div",
         { className: "dshImgSkin-entries" },
-        entry("images", "贴图", "窗口壁纸、各区域图片 / 视频、角标、面板透明度、存储清理。", false),
+        entry(
+          "images",
+          "贴图",
+          "窗口壁纸、各区域图片 / 视频、角标、面板透明度、存储清理。",
+          configuredAreas ? `已配置 ${configuredAreas} / ${AREAS.length} 个区域` : "还没放图 · 建议先配「窗口」",
+          false,
+        ),
         entry(
           "ai",
           "AI 纹样",
           "给按钮和弹窗加装饰框：档位 0 本机取色，1–4 由生图模型画。",
+          aiStatus,
           !hasWallpaper,
           "先给「窗口」放一张贴图才能进——AI 要参考它的配色。",
         ),
@@ -2277,13 +2381,25 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
 
     const imagesPage = h(
       "div",
-      { className: "dshImgSkin-shell" },
+      { className: "dshImgSkin-shell", "data-dsh-skin-chrome": "settings" },
       back("贴图"),
       h(
         "p",
         { className: "dshImgSkin-intro" },
         "给界面各区域换上你自己的图片或视频；图片只存在本机（$DSH_HOME/image-skin），不会上传到外部服务。",
       ),
+      configuredAreas === 0
+        ? h(
+            "div",
+            { className: "dshImgSkin-tipCard" },
+            h("span", { className: "dshImgSkin-tipTitle" }, "第一步：给「窗口」放一张图"),
+            h(
+              "p",
+              { className: "dshImgSkin-sub" },
+              "整块底图换掉之后界面立刻不一样；其余区域可以之后再单独配，浅色 / 深色也能各配一套。",
+            ),
+          )
+        : null,
       notice ? h("p", { className: "dshImgSkin-banner" }, notice) : null,
       h(
         "div",
@@ -2388,7 +2504,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
 
     const aiPage = h(
       "div",
-      { className: "dshImgSkin-shell" },
+      { className: "dshImgSkin-shell", "data-dsh-skin-chrome": "settings" },
       back("AI 纹样"),
       h(
         "p",

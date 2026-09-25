@@ -32,7 +32,9 @@ exactly where you want it**, and it does a few things the others do not:
   the rail behind them) with colours pulled from your wallpaper, so the interface stops looking
   grey. Level 0 does that locally, offline. Levels 1–4 ask a text-to-image model for a real
   ornamental frame — corner flourishes and a repeating edge, no text, no figures — which is then
-  used as a border. Any OpenAI-compatible image API will do; the key stays on your machine.
+  used as a border. Any OpenAI-compatible image API will do; the key stays on your machine. The
+  sampled colours ride along in the prompt, so the ornament comes back in your wallpaper's
+  palette, and a video backdrop is sampled from a real frame.
 - **Smooth, and it stays smooth** — the light/dark cross-fade animates only what a compositor can
   animate, and on a heavy DOM it stops touching text colour, which is what makes other
   implementations stutter on a long conversation.

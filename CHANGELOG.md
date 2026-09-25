@@ -19,6 +19,10 @@ OpenAI / FLUX / Stability / 自定义），设置页里能检测环境变量有�
 An accent pass over the interface skeleton, plus AI-generated ornament borders.
 
 ### Added
+- **Entry cards carry state.** Level one answers "where am I up to?" without a click: the 贴图 card shows
+  how many areas are configured, the AI card shows the current level (or that decoration is off).
+  Group headers carry the same count as `1/6 已配`, a dashed card and a 从这里开始 tag mark the first
+  step when nothing is set yet, and the back bar sticks to the top while you scroll.
 - **Two-level settings screen.** Level one is a choice — 「贴图」for the artwork, 「AI 纹样」for the
   ornament — instead of everything stacked on one page. The AI entry is locked while the window
   region has no image (the ornament samples its palette from that image), and entering it raises a
@@ -44,6 +48,18 @@ An accent pass over the interface skeleton, plus AI-generated ornament borders.
   with no key and no network.
 
 ### Fixed
+- **The settings screen was the least readable screen in the product.** The panel-opacity slider
+  re-points DSH's own background tokens — which is exactly the point out in the app, but it turned our
+  own cards into frosted glass over the wallpaper. Our surfaces now read one opaque colour of the
+  current scheme, so the screens you configure things from stay legible at any opacity.
+- **The accent did nothing at all for a video wallpaper.** Palette extraction decoded an `<img>`, which
+  never succeeds for an `mp4`/`webm`, so the whole local half silently no-opped for anyone using the
+  feature the plugin is proudest of. It now samples a real frame from the video.
+- **The generated ornament never received the palette.** The prompt could only say "colours sampled
+  from the wallpaper", which is a thing an image model has no way of seeing. The sampled colours are
+  now written back with the settings and travel with the prompt as `r, g, b` triplets.
+- **The accent no longer decorates our own settings chrome** (`data-dsh-skin-chrome`), which the
+  exclusion list always intended but the settings section never opted into.
 - **The welcome-page card ignored the theme.** `_card` used a hard-coded white background instead of
   the theme token, so it stayed opaque no matter what panel opacity you chose.
 - **Re-applying the plugin could tear down the instance it had just built.** `apply()` called twice
