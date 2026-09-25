@@ -825,13 +825,25 @@ async function sampleArtwork(url: string, refresh = false): Promise<ArtworkReadi
     const hit = artworkCache.get(url);
     if (hit) return hit;
   }
-  const w = 64;
+  // 160px wide, not 64: at 64 a wallpaper of sky, clouds and a character collapses into two flat
+  // blues, which is why the scheme "did not follow" the picture. 160 keeps the small but vivid areas
+  // (a pink cloud edge, the character's yellow accents) alive in the histogram.
+  const w = 160;
   const canvas = document.createElement("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) return null;
+  /** One frame's worth of pixels, painted into the canvas and handed to the caller. */
+  const paint = async (draw: (cw: number, ch: number) => void, aspect: number): Promise<void> => {
+    const h = Math.max(1, Math.round(w * aspect));
+    canvas.width = w;
+    canvas.height = h;
+    draw(w, h);
+  };
 
-  // A video backdrop never decodes into an <img>, so sample a real frame instead. Without this the
-  // accent silently did nothing at all for anyone using a video wallpaper.
+  // A video backdrop never decodes into an <img>, so sample real frames instead. Without this the
+  // accent silently did nothing at all for anyone using a video wallpaper. Three moments of the clip
+  // are merged, so the palette describes the whole loop rather than one instant of it.
+  const frames: Uint8ClampedArray[] = [];
   if (VIDEO_RE.test(url)) {
     const video = document.createElement("video");
     video.muted = true;
@@ -844,19 +856,25 @@ async function sampleArtwork(url: string, refresh = false): Promise<ArtworkReadi
         video.addEventListener("error", () => reject(new Error("video failed")), { once: true });
         setTimeout(() => reject(new Error("video timed out")), 5000);
       });
-      // Step into the clip: the first frame of a loop is often a fade-in.
-      await new Promise<void>((resolve) => {
-        video.addEventListener("seeked", () => resolve(), { once: true });
-        setTimeout(resolve, 1500);
-        video.currentTime = Math.min(0.5, (Number.isFinite(video.duration) ? video.duration : 1) * 0.1);
-      });
     } catch {
       return null;
     }
-    const h = Math.max(1, Math.round((w * video.videoHeight) / Math.max(1, video.videoWidth)));
-    canvas.width = w;
-    canvas.height = h;
-    ctx.drawImage(video, 0, 0, w, h);
+    const aspect = video.videoHeight / Math.max(1, video.videoWidth);
+    const duration = Number.isFinite(video.duration) && video.duration > 0.4 ? video.duration : 1;
+    for (const fraction of [0.08, 0.4, 0.72]) {
+      try {
+        await new Promise<void>((resolve) => {
+          video.addEventListener("seeked", () => resolve(), { once: true });
+          setTimeout(resolve, 1200);
+          video.currentTime = Math.max(0, Math.min(duration - 0.05, duration * fraction));
+        });
+        await paint((cw, ch) => ctx.drawImage(video, 0, 0, cw, ch), aspect);
+        frames.push(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+      } catch {
+        /* a frame that will not seek is simply skipped */
+      }
+    }
+    if (!frames.length) return null;
   } else {
     const img = new Image();
     img.crossOrigin = "anonymous";
@@ -866,10 +884,12 @@ async function sampleArtwork(url: string, refresh = false): Promise<ArtworkReadi
     } catch {
       return null;
     }
-    const h = Math.max(1, Math.round((w * img.height) / Math.max(1, img.width)));
-    canvas.width = w;
-    canvas.height = h;
-    ctx.drawImage(img, 0, 0, w, h);
+    await paint((cw, ch) => ctx.drawImage(img, 0, 0, cw, ch), img.height / Math.max(1, img.width));
+    try {
+      frames.push(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+    } catch {
+      return null;                                // tainted canvas - treat as "no reading"
+    }
   }
 
   let data: Uint8ClampedArray;
@@ -885,32 +905,40 @@ async function sampleArtwork(url: string, refresh = false): Promise<ArtworkReadi
     return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
   };
 
-  // ── palette: 4-bit histogram, scored by "usable as a UI colour" ──
+  // ── palette: 4-bit histogram over every sampled frame, scored by "usable as a UI colour" ──
   const buckets = new Map<string, { n: number; r: number; g: number; b: number }>();
-  for (let i = 0; i < data.length; i += 4) {
-    if (data[i + 3] < 200) continue;
-    const key = `${data[i] >> 4},${data[i + 1] >> 4},${data[i + 2] >> 4}`;
-    const e = buckets.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
-    e.n += 1;
-    e.r += data[i];
-    e.g += data[i + 1];
-    e.b += data[i + 2];
-    buckets.set(key, e);
+  for (const pixels of frames) {
+    for (let i = 0; i < pixels.length; i += 4) {
+      if (pixels[i + 3] < 200) continue;
+      const key = `${pixels[i] >> 4},${pixels[i + 1] >> 4},${pixels[i + 2] >> 4}`;
+      const e = buckets.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
+      e.n += 1;
+      e.r += pixels[i];
+      e.g += pixels[i + 1];
+      e.b += pixels[i + 2];
+      buckets.set(key, e);
+    }
   }
   const score = (r: number, g: number, b: number): number => {
     const max = Math.max(r, g, b);
     const min = Math.min(r, g, b);
     const sat = max === 0 ? 0 : (max - min) / max;
     const lig = (max + min) / 510;
-    return sat * Math.max(0, 1 - Math.abs(lig - 0.55) * 1.8);
+    // The window used to be narrow around mid-lightness, which quietly disqualified exactly the
+    // colours a sky, sunset or nebula wallpaper is made of (bright and saturated) in favour of dark
+    // navy corners - the theme then never followed the picture. Pale-but-saturated now keeps a real
+    // rank; only near-white washes and near-black stay low.
+    return sat * Math.max(0.16, 1 - Math.abs(lig - 0.62) * 1.05);
   };
+  const totalPixels = frames.reduce((a, p) => a + p.length / 4, 0);
   const palette = [...buckets.values()]
     .map((e) => ({ r: e.r / e.n, g: e.g / e.n, b: e.b / e.n, n: e.n, s: score(e.r / e.n, e.g / e.n, e.b / e.n) }))
     // Near-grey and vanishingly rare colours are dropped, not ranked: one muddy grey cluster should
-    // not decide the whole theme.
-    .filter((e) => e.s > 0.1 && e.n > Math.max(4, data.length / 4 / 400))
+    // not decide the whole theme. The floor is low on purpose - a small vivid area is worth keeping,
+    // it is often the one colour that makes the picture recognisable.
+    .filter((e) => e.s > 0.1 && e.n > Math.max(3, totalPixels / 1200))
     .sort((a, b) => b.n * (0.3 + b.s) - a.n * (0.3 + a.s))
-    .slice(0, 4)
+    .slice(0, 6)
     .map((e) => `${Math.round(e.r)}, ${Math.round(e.g)}, ${Math.round(e.b)}`);
 
   // ── light: brightest 3×3 cell, and how warm that cell is ──
@@ -1162,6 +1190,14 @@ interface AccentScheme {
   spark: string;
   /** The colour of the light the picture is lit by, for the lit edge and the gradient. */
   lightTint: string;
+  /**
+   * A second, genuinely different hue from the same picture. One hue reads as a filter laid over the
+   * wallpaper; borrowing a second colour is what makes a multi-colour picture feel followed rather
+   * than flattened. It dresses the ornament's second rule and the lace, never the surface.
+   */
+  edge: string;
+  /** True when the second hue really came from the picture. */
+  edgeFromArtwork: boolean;
 }
 
 /** One hue in, a whole scheme out: three roles, contrast-checked against the surface. */
@@ -1172,14 +1208,20 @@ function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["lig
       const { r, g, b } = parseTriple(p);
       return { ...rgbToHsl(r, g, b) };
     })
-    // Rank by "usable as a UI colour": it has to be a colour at all, and it cannot be so dark or
-    // so pale that nothing can be built from it.
-    .map((c) => ({ ...c, rank: c.s < 0.12 ? 0 : c.s * Math.max(0, 1 - Math.abs(c.l - 0.55) * 1.5) }))
+    // Rank by "usable as a UI colour": it has to be a colour at all, and it must not be so dark or so
+    // washed out that nothing can be built from it. Same widened window as the sampler, for the same
+    // reason - a bright wallpaper colour is a perfectly good theme colour.
+    .map((c) => ({ ...c, rank: c.s < 0.1 ? 0 : c.s * Math.max(0.18, 1 - Math.abs(c.l - 0.62) * 1.05) }))
     .sort((a, b) => b.rank - a.rank);
 
   const usable = sampled[0] && sampled[0].rank > 0.04;
   const hue = usable ? sampled[0].h : 214;                       // calm steel blue when the art is grey
-  const sat = usable ? Math.min(0.62, Math.max(0.30, sampled[0].s)) : 0.26;
+  // Saturation comes from the most colourful usable entry, not from the seed itself. The seed is
+  // usually the *largest* area, which on a night sky or a nebula is a near-black that carries the
+  // right hue but almost no colour - clamping to its own saturation is what turned a vivid pink
+  // wallpaper into a grey UI.
+  const maxSat = sampled.reduce((a, c) => (c.rank > 0.04 ? Math.max(a, c.s) : a), 0);
+  const sat = usable ? Math.min(0.62, Math.max(0.34, maxSat || sampled[0].s)) : 0.26;
 
   const bg = mode === "dark" ? [18, 31, 47] : [255, 253, 252];
   const bgLum = relativeLuminance(bg[0], bg[1], bg[2]);
@@ -1187,9 +1229,26 @@ function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["lig
   const inkL = fitLightness(hue, Math.min(0.72, sat + 0.12), mode === "dark" ? 0.82 : 0.32, bgLum, 4.6, mode === "dark");
   const washL = mode === "dark" ? 0.62 : 0.48;
 
+  // The second hue: the most *different* usable colour the picture offered (at least ~40° away, so
+  // it reads as a partner rather than a wobble). When the picture only has one hue, one is built by
+  // rotating 34° - still in the picture's own family, still visibly a second voice.
+  const hueDistance = (a: number, b: number) => {
+    const d = Math.abs(a - b) % 360;
+    return d > 180 ? 360 - d : d;
+  };
+  const partner = sampled
+    .filter((c) => c.rank > 0.03 && hueDistance(c.h, hue) > 40)
+    .sort((a, b) => hueDistance(b.h, hue) * b.rank - hueDistance(a.h, hue) * a.rank)[0];
+  const edgeHue = partner ? partner.h : (hue + 34) % 360;
+  const edgeSat = partner ? Math.min(0.6, Math.max(0.26, partner.s)) : Math.min(0.6, sat + 0.06);
+  const edgeL = fitLightness(edgeHue, edgeSat, mode === "dark" ? 0.66 : 0.46, bgLum, 2.1, mode === "dark");
+
   // The spark: the most vivid colour the picture has (usually not the seed), pushed until it is
-  // clearly readable, so it can mark "this is interactive" without shouting anywhere else.
-  const vivid = sampled.length > 1 ? sampled.find((c) => c.rank > 0.04) ?? sampled[0] : sampled[0];
+  // clearly readable, so it can mark "this is interactive" without shouting anywhere else. If the
+  // vivid colour is all but the same hue as the seed, borrow the partner instead - a hover that
+  // differs only in lightness is not a signal.
+  const vividPick = sampled.find((c) => c.rank > 0.04 && hueDistance(c.h, hue) > 25);
+  const vivid = vividPick ?? sampled.find((c) => c.rank > 0.04) ?? sampled[0];
   const sparkL = fitLightness(vivid?.h ?? hue, Math.min(0.85, (vivid?.s ?? sat) + 0.15), mode === "dark" ? 0.78 : 0.44, bgLum, 3.4, mode === "dark");
 
   return {
@@ -1201,6 +1260,8 @@ function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["lig
     tint: mode === "dark" ? 0.16 : 0.10,
     lineAlpha: mode === "dark" ? 0.5 : 0.4,
     fromArtwork: Boolean(usable),
+    edge: hslTriple(edgeHue, edgeSat, edgeL).join(", "),
+    edgeFromArtwork: Boolean(partner),
     spark: hslTriple(vivid?.h ?? hue, Math.min(0.85, (vivid?.s ?? sat) + 0.15), sparkL).join(", "),
     // 借光: the *colour of the light* the picture is lit by, not a colour from it.
     lightTint: (light?.warmth ?? 0) > 0.02 ? "255, 236, 205" : "214, 236, 255",
@@ -1278,9 +1339,10 @@ function frameDataUri(corner: string, edge: string, variant: "tick" | "bracket" 
   // slice, which border-image throws away. Hence outer=rail from the rects, centre=bead chain,
   // inner=lace. Everything is on a period that divides the band evenly, so tiling cannot seam.
   const band = S - SL * 2; // 44
-  const step = band / 4;
+  const beads = ornate ? 4 : 2; // dense chains read as a dotted outline; fewer, bigger marks read as design
+  const step = band / beads;
   const outer = SL / 2; // ~13: the middle of the band's thickness
-  for (let k = 0; k < 4; k++) {
+  for (let k = 0; k < beads; k++) {
     const x = SL + step / 2 + step * k;
     const r = ornate ? 3 : 2.4;
     parts.push(`<circle cx="${x}" cy="${outer}" r="${r}" fill="${edge}" stroke="none"/>`);
@@ -1366,15 +1428,17 @@ function accentCss(
   const small = `${root} [${ACCENT_MARK}="small"]`;
   const panel = `${root} [${ACCENT_MARK}="panel"]`;
   const both = `${small}, ${panel}`;
-  const { line, ink, wash, lightTint, spark } = scheme;
+  const { line, ink, wash, lightTint, spark, edge } = scheme;
   const lines: string[] = [];
 
   // Shared base: a low-alpha tint plus one hairline. This is the whole of level 0.
   //
   // The hairline is drawn with `outline` rather than `border`: outline costs no layout, cannot eat
   // a control's existing box-shadow, and `:not(:focus-visible)` keeps DSH's focus ring intact.
+  // Softened: a full-strength hairline everywhere read as "disabled outline" rather than design. -1px
+  // offset keeps it hugging the shape.
   const tint = [0.08, 0.11, 0.14, 0.16, 0.18][level] ?? 0.08;
-  const alpha = [0.26, 0.34, 0.42, 0.48, 0.54][level] ?? 0.26;
+  const alpha = [0.22, 0.28, 0.33, 0.38, 0.43][level] ?? 0.22;
   const hairline = (sel: string) =>
     `${sel}:not(:focus-visible) {\n  outline: 1px solid rgba(${line}, ${alpha}) !important;\n  outline-offset: -1px !important;\n}`;
 
@@ -1418,6 +1482,22 @@ function accentCss(
     `}`,
   );
 
+  // Controls get a little craft without touching their own background or shadow: a hover that lifts a
+  // pixel and warms very slightly, a press that settles back, and the picture's spark on the edge.
+  // (Box-shadow and border are left alone deliberately - DSH's own button styles stay intact.)
+  lines.push(
+    `${small} {`,
+    `  transition: filter .18s ease, transform .18s ease, outline-color .18s ease, background-color 4s ease !important;`,
+    `}`,
+    `${small}:hover:not(:disabled) {`,
+    `  filter: brightness(1.06) saturate(1.06) !important;`,
+    `  transform: translateY(-1px);`,
+    `}`,
+    `${small}:active:not(:disabled) {`,
+    `  filter: brightness(.97) !important;`,
+    `  transform: translateY(0);`,
+    `}`,
+  );
   lines.push(hairline(`${small}:not([data-dsh-skin-busy="1"])`));
 
   if (level === 0) {
@@ -1432,7 +1512,7 @@ function accentCss(
   const variant = level >= 4 ? "ornate" : level >= 3 ? "rich" : level >= 2 ? "bracket" : "tick";
   const art = usingArt
     ? `url("${chosenFrame}")`
-    : frameDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`, variant);
+    : frameDataUri(`rgba(${ink}, .88)`, `rgba(${edge}, .72)`, variant);
   // The frame is a fixed number of pixels per side, so a panel needs more of them than it looks:
   // a 9px frame on an 800px dialog scales its corner motif down to two pixels and vanishes. The
   // generated art is heavier per pixel, so it gets less width - at 18px it started covering the
@@ -1460,17 +1540,20 @@ function accentCss(
     `  border-image-repeat: ${repeat} !important;`,
     `}`,
   );
-  const dressControls = usingArt ? frame.controls : level >= 4 || frame.controls;
+  // A generated frame is a picture of an ornament built for a 40-60px band. Painting it into a 30px
+  // button squeezes a whole floral engraving into five pixels, which reads as dotted noise - that is
+  // most of what "生硬" was. Controls therefore always wear the *purpose-drawn* corner ornament.
+  const dressControls = level >= 4 || frame.controls;
   if (dressControls) {
-    const controlArt = usingArt ? art : cornerOrnamentDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`);
+    const controlArt = cornerOrnamentDataUri(`rgba(${ink}, .88)`, `rgba(${edge}, .72)`);
     lines.push(
       `${small} {`,
       `  border: 1px solid transparent !important;`,
       `  border-image-source: ${controlArt} !important;`,
-      `  border-image-slice: ${usingArt ? slice : "27%"} !important;`,
-      `  border-image-width: ${Math.max(2, Math.round((usingArt ? 6 : 5) * frame.scale))}px !important;`,
+      `  border-image-slice: 27% !important;`,
+      `  border-image-width: ${Math.max(2, Math.round(5 * frame.scale))}px !important;`,
       `  border-image-outset: 1px !important;`,
-      `  border-image-repeat: ${repeat} !important;`,
+      `  border-image-repeat: round !important;`,
       `}`,
     );
   }
@@ -1534,11 +1617,17 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
   }
 
   // 呼吸: keep the first hue for this wallpaper, and hold rather than jump when a video frame
-  // drifts somewhere else entirely. Subtle drift is the point; a colour swing is not.
+  // drifts somewhere else entirely. Small drift is the point; a colour swing is not.
+  //
+  // The guard used to be 25°, which turned out to be tight enough that a wallpaper whose *scene*
+  // changes (a clip that cuts from daylight sky to a pink nebula) could never be followed at all -
+  // the theme stayed on the first scene's colour for the whole loop. 60° lets a real scene change
+  // through while still swallowing frame-to-frame jitter.
   const frameHue = seedHueOf(palette);
   if (!breathSeed || breathSeed.url !== wallpaper) breathSeed = { url: wallpaper, hue: frameHue };
-  else if (refresh && breathSeed.hue !== null && frameHue !== null && hueDistance(frameHue, breathSeed.hue) > 25) {
-    return;                                       // too far from the seed - keep what we have
+  else if (refresh && breathSeed.hue !== null && frameHue !== null && hueDistance(frameHue, breathSeed.hue) > 60) {
+    // A jump this large is a new scene, not drift: adopt it as the new seed and follow on from there.
+    breathSeed = { url: wallpaper, hue: frameHue };
   } else if (breathSeed.hue === null && frameHue !== null) {
     breathSeed.hue = frameHue;
   }
