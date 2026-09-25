@@ -72,5 +72,18 @@ check("nothing configured resolves empty", mod.resolveAreaImage({}, "center", "d
 check("an undefined value is tolerated", mod.resolveAreaImage(undefined, "window", "light") === "");
 check("an unknown area resolves empty", mod.resolveAreaImage(full, "nope", "dark") === "");
 
+console.log("== the AI gate ==");
+check("windowHasArtwork is exposed", typeof mod.windowHasArtwork === "function");
+check("no value at all -> locked", mod.windowHasArtwork(undefined) === false);
+check("an empty value -> locked", mod.windowHasArtwork({}) === false);
+check("a shared window image -> unlocked", mod.windowHasArtwork({ windowImage: "w.png" }) === true);
+check("a light-only window image -> unlocked", mod.windowHasArtwork({ windowImageLight: "l.png" }) === true);
+check("a dark-only window image -> unlocked", mod.windowHasArtwork({ windowImageDark: "d.png" }) === true);
+check("an empty string does not unlock", mod.windowHasArtwork({ windowImage: "", windowImageDark: "" }) === false);
+check(
+  "other regions never unlock the AI screen",
+  mod.windowHasArtwork({ centerImage: "c.png", stickerSidebarImage: "s.png" }) === false,
+);
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

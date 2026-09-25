@@ -66,15 +66,24 @@ The bundled helper does steps 1–2 for you: `node scripts/install.mjs --profile
 
 ## Usage
 
-**Settings → 图片皮肤 / Image skin.** One screen:
+**Settings → 图片皮肤 / Image skin.** Two levels:
+
+*Level one — choose a workbench.* 「贴图」edits artwork; 「AI 纹样」decorates the skeleton. The AI
+entry stays **locked until the window region has an image**, because the ornament samples its
+colours from that image; and it raises a short pre-flight notice when you go in (five lines about
+what leaves the machine, what costs money, and what stays local) — 不再显示 silences it for good.
+
+*贴图 / Images* — one screen:
 
 - **正在编辑 / Editing** — a segmented control for 浅色模式 / 深色模式, i.e. *which set of images you
   are editing*. Flipping it also flips the live theme, so you configure what you see.
 - **界面区域 / Regions** and **角标贴图 / Stickers** — one card per area: thumbnail, name, where
   its artwork comes from (`浅色专用` / `两模式共用` / `未设置`), and its controls.
-- **全局效果 / Global** — panel opacity, video playback rate, and the accent level (0 = local
-  palette only, 1–4 = AI-generated ornament strength).
+- **全局效果 / Global** — panel opacity, video playback rate.
 - **存储 / Storage** — `清理未使用图片` collects stored files no area references any more.
+
+*AI 纹样 / AI ornament* — the accent level slider (0 = local palette, 1–4 = generation strength)
+plus the generator: provider, key, count, size, style, a prompt preview, and the wall of results.
 
 | Control | Meaning |
 |---|---|
@@ -195,12 +204,20 @@ dsh plugin --profile web add dsh-image-skin
 
 ### 用法
 
-**设置 → 图片皮肤**，一屏搞定：
+**设置 → 图片皮肤**，分两级：
 
-- **正在编辑**：浅色 / 深色分段控件，选的是"你正在配哪一套图"；切换时会同时把界面主题切过去，边配边看。
+*一级——选工作台*：「贴图」管图片，「AI 纹样」管装饰。**窗口没有图就进不了 AI 纹样**（装饰要从那张图里
+取色），而且第一次进去会弹一页「用之前先看这五条」的提示——下面有「不再显示」。
+
+*贴图* 页：
+
+- **正在编辑**：浅色 / 深色分段控件，选的是“你正在配哪一套图”；切换时会同时把界面主题切过去，边配边看。
 - **界面区域** / **角标贴图**：每个区域一张卡片——缩略图、名称、图的来源（浅色专用 / 两模式共用 / 未设置）和操作。
-- **全局效果**：面板不透明度、视频播放速率、装饰纹样档位（0 = 本机取色，1–4 = AI 生成强度）。
+- **全局效果**：面板不透明度、视频播放速率。
 - **存储**：「清理未使用图片」会回收不再被任何区域引用的文件。
+
+*AI 纹样* 页：装饰档位（0 = 本机取色，1–4 = 生成强度）+ 生图工作台（服务商 / Key / 张数 / 尺寸 / 风格 /
+提示词预览 / 结果图墙）。
 
 ### 结构
 

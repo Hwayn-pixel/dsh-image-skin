@@ -191,6 +191,31 @@ function ensureBaseStyles(): void {
     "transition:opacity .14s ease;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px}",
     ".dshImgSkin-accentCaption[data-visible='false']{opacity:0}",
     ".dshImgSkin-accentLevel{font-weight:600;opacity:.9}",
+
+    // ── level one: the choice screen ──────────────────────────────────────────
+    ".dshImgSkin-nav{display:flex;align-items:center;gap:10px}",
+    ".dshImgSkin-navTitle{font-size:13.5px;font-weight:600}",
+    ".dshImgSkin-entries{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}",
+    ".dshImgSkin-entry{display:flex;flex-direction:column;gap:5px;text-align:left;cursor:pointer;font:inherit;color:inherit;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.22));border-radius:14px;padding:14px 16px;background:var(--dsw-alias-bg-layer-1,transparent);transition:border-color .15s,background .15s}",
+    ".dshImgSkin-entry:hover:not(:disabled){border-color:var(--dsw-alias-brand-primary,#5aa7d8);",
+    "background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.08))}",
+    ".dshImgSkin-entry:disabled{opacity:.5;cursor:not-allowed}",
+    ".dshImgSkin-entryTop{display:flex;align-items:center;justify-content:space-between;gap:10px}",
+    ".dshImgSkin-entryTitle{font-size:14px;font-weight:600}",
+    ".dshImgSkin-entryGo{font-size:11.5px;opacity:.6;white-space:nowrap}",
+    ".dshImgSkin-entrySub{font-size:11.5px;line-height:1.6;opacity:.6}",
+    ".dshImgSkin-lock{font-size:11px;line-height:1.5;opacity:.75;color:var(--dsw-alias-state-warn-primary,#c9881f)}",
+
+    // ── the pre-flight notice ─────────────────────────────────────────────────
+    ".dshImgSkin-modal{position:fixed;inset:0;z-index:2147483000;display:grid;place-items:center;padding:24px;",
+    "background:rgba(0,0,0,.46)}",
+    ".dshImgSkin-modalCard{width:100%;max-width:520px;max-height:78vh;overflow:auto;border-radius:16px;padding:18px 20px;display:flex;flex-direction:column;gap:10px;border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.24));box-shadow:0 18px 48px rgba(0,0,0,.3)}",
+    ".dshImgSkin-modalTitle{font-size:15px;font-weight:700}",
+    ".dshImgSkin-modalList{margin:0;padding-left:20px;font-size:12.5px;line-height:1.8;opacity:.85}",
+    ".dshImgSkin-modalActions{display:flex;flex-direction:column;align-items:center;gap:6px;margin-top:4px}",
+    ".dshImgSkin-modalDismiss{cursor:pointer;border:0;background:transparent;color:inherit;font:inherit;font-size:12px;",
+    "opacity:.55;padding:2px 6px;text-decoration:underline;text-underline-offset:3px}",
+    ".dshImgSkin-modalDismiss:hover{opacity:.9}",
     ".dshImgSkin-field{display:grid;grid-template-columns:78px minmax(0,1fr);gap:6px 10px;align-items:start}",
     ".dshImgSkin-fieldLabel{font-size:12px;opacity:.68;padding-top:6px}",
     ".dshImgSkin-fieldBody{display:flex;flex-direction:column;gap:4px;min-width:0}",
@@ -281,6 +306,16 @@ export function resolveAreaImage(value: SkinValue | undefined, id: string, mode:
   const v = value ?? {};
   const specific = String(v[`${id}Image${mode === "dark" ? "Dark" : "Light"}`] ?? "");
   return specific || String(v[`${id}Image`] ?? "");
+}
+
+/**
+ * Whether the window region carries any artwork at all, in either mode.
+ *
+ * The ornament work samples its palette from the window image, so the AI screen is gated on this:
+ * without a wallpaper there is nothing to sample and nothing to decorate. Exported for the suite.
+ */
+export function windowHasArtwork(value: SkinValue | undefined): boolean {
+  return Boolean(resolveAreaImage(value, "window", "light") || resolveAreaImage(value, "window", "dark"));
 }
 
 /** The stored playback rate, clamped to the schema's range. */
@@ -871,12 +906,14 @@ function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: st
 async function applyAccent(value: SkinValue, mode: Mode): Promise<void> {
   let style = document.getElementById(ACCENT_STYLE_ID) as HTMLStyleElement | null;
   const raw = Number(value.accentLevel ?? 0);
-  const level = Number.isFinite(raw) ? Math.max(0, Math.min(3, Math.round(raw))) : 0;
+  const level = Number.isFinite(raw)
+    ? Math.max(0, Math.min(ACCENT_LEVELS.length - 1, Math.round(raw)))
+    : 0;
   const wallpaper = resolveAreaImage(value, "window", mode);
 
-  // Level 3 is not implemented yet: fall back to the richest local level rather than
-  // pretending to have decorated anything.
-  const effective = level === 3 ? 2 : level;
+  // Levels 0-2 are drawn here; 3-4 hand the border over to a generated ornament (picked in the
+  // AI panel), so the generated CSS never has to reach past the richest local level.
+  const effective = Math.min(2, level);
 
   if (!wallpaper || value.accentEnabled === false) {
     document.body.removeAttribute(ACCENT_ATTR);
@@ -2118,9 +2155,130 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       ),
     );
 
-    return h(
+
+    // ── two levels ────────────────────────────────────────────────────────────
+    // Level one is a choice, level two is a workbench. They live on separate screens because the
+    // image editor and the ornament workbench answer different questions - and because the AI
+    // half has nothing to do until a wallpaper exists to sample colours from.
+    const hasWallpaper = windowHasArtwork(v);
+    const [page, setPage] = React.useState<"home" | "images" | "ai">("home");
+    const [riskOpen, setRiskOpen] = React.useState(false);
+
+    // Entering the AI screen raises the notice unless it has been silenced. Losing the wallpaper
+    // drops you back to the choice screen, so the locked entry never lies about being usable.
+    React.useEffect(() => {
+      if (page !== "ai") {
+        setRiskOpen(false);
+        return;
+      }
+      if (!hasWallpaper) {
+        setPage("home");
+        return;
+      }
+      if (v.accentRiskHidden !== true) setRiskOpen(true);
+    }, [page, hasWallpaper, v.accentRiskHidden]);
+
+    const back = (title: string) =>
+      h(
+        "div",
+        { className: "dshImgSkin-nav" },
+        h("button", { className: "dshImgSkin-btn", type: "button", onClick: () => setPage("home") }, "← 返回"),
+        h("span", { className: "dshImgSkin-navTitle" }, title),
+      );
+
+    const entry = (target: "images" | "ai", title: string, sub: string, locked: boolean, lockedHint?: string) =>
+      h(
+        "button",
+        {
+          key: target,
+          type: "button",
+          className: "dshImgSkin-entry",
+          disabled: locked,
+          onClick: () => {
+            if (!locked) setPage(target);
+          },
+        },
+        h(
+          "span",
+          { className: "dshImgSkin-entryTop" },
+          h("span", { className: "dshImgSkin-entryTitle" }, title),
+          h("span", { className: "dshImgSkin-entryGo" }, locked ? "🔒 需要壁纸" : "进入 →"),
+        ),
+        h("span", { className: "dshImgSkin-entrySub" }, sub),
+        locked && lockedHint ? h("span", { className: "dshImgSkin-lock" }, lockedHint) : null,
+      );
+
+    // Shown before anything is generated, every time you come in, until "不再显示" is ticked.
+    const riskModal = h(
+      "div",
+      { className: "dshImgSkin-modal", role: "dialog", "aria-modal": "true" },
+      h(
+        "div",
+        {
+          className: "dshImgSkin-modalCard",
+          style: { background: mode === "dark" ? "#26262b" : "#ffffff" },
+        },
+        h("span", { className: "dshImgSkin-modalTitle" }, "用 AI 纹样之前，先看这五条"),
+        h(
+          "ul",
+          { className: "dshImgSkin-modalList" },
+          h("li", null, "点「生成」时，提示词和壁纸配色会发给你选的第三方生图服务——这部分内容会离开本机。"),
+          h("li", null, "档位 1–4 会按你在那家服务的账号计费，张数和尺寸都影响花费。"),
+          h("li", null, "画成什么样由模型决定，不保证一次满意，可能要试几张才挑到合适的。"),
+          h("li", null, "API Key 只存在本机（或读环境变量，界面里只读），不会发给除你选定服务之外的任何地方。"),
+          h("li", null, "档位 0「取色」完全在本机计算：不联网、不花钱、不需要 key。"),
+        ),
+        h(
+          "div",
+          { className: "dshImgSkin-modalActions" },
+          h(
+            "button",
+            { className: "dshImgSkin-btn", type: "button", "data-variant": "primary", onClick: () => setRiskOpen(false) },
+            "我明白了",
+          ),
+          h(
+            "button",
+            {
+              className: "dshImgSkin-modalDismiss",
+              type: "button",
+              onClick: () => {
+                void scope.set("accentRiskHidden", true);
+                setRiskOpen(false);
+              },
+            },
+            "不再显示",
+          ),
+        ),
+      ),
+    );
+
+    const home = h(
       "div",
       { className: "dshImgSkin-shell" },
+      h(
+        "p",
+        { className: "dshImgSkin-intro" },
+        "分两步走：先在「贴图」里放上自己的画面，再决定要不要用「AI 纹样」给按钮和弹窗加装饰。图片只存在本机（$DSH_HOME/image-skin）。",
+      ),
+      h(
+        "div",
+        { className: "dshImgSkin-entries" },
+        entry("images", "贴图", "窗口壁纸、各区域图片 / 视频、角标、面板透明度、存储清理。", false),
+        entry(
+          "ai",
+          "AI 纹样",
+          "给按钮和弹窗加装饰框：档位 0 本机取色，1–4 由生图模型画。",
+          !hasWallpaper,
+          "先给「窗口」放一张贴图才能进——AI 要参考它的配色。",
+        ),
+      ),
+      notice ? h("p", { className: "dshImgSkin-banner" }, notice) : null,
+    );
+
+    const imagesPage = h(
+      "div",
+      { className: "dshImgSkin-shell" },
+      back("贴图"),
       h(
         "p",
         { className: "dshImgSkin-intro" },
@@ -2185,19 +2343,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           onPreview: (n: number) => previewVideoRate(n),
           onCommit: (n: number) => void scope.set("videoPlaybackRate", n),
         }),
-        h(AccentRow, {
-          key: "accent",
-          level: Number(v.accentLevel ?? 0),
-          enabled: v.accentEnabled !== false,
-          onChange: (n: number) => void scope.set("accentLevel", n),
-          onToggle: (on: boolean) => void scope.set("accentEnabled", on),
-        }),
       ),
-      h(AiAccentPanel, {
-        value: v,
-        strength: Math.max(1, Number(v.accentLevel ?? 1)),
-        onSet: (field: string, val: unknown) => void scope.set(field, val),
-      }),
       h(
         "div",
         { className: "dshImgSkin-card" },
@@ -2239,6 +2385,36 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
         gcStatus ? h("p", { className: "dshImgSkin-ok" }, gcStatus) : null,
       ),
     );
+
+    const aiPage = h(
+      "div",
+      { className: "dshImgSkin-shell" },
+      back("AI 纹样"),
+      h(
+        "p",
+        { className: "dshImgSkin-intro" },
+        "档位 0 只在本机按壁纸配色给按钮 / 弹窗上色，不联网；档位 1–4 让生图模型画一张装饰边框，生成后在下面挑一张应用。",
+      ),
+      h(
+        "div",
+        { className: "dshImgSkin-card" },
+        h(AccentRow, {
+          key: "accent",
+          level: Number(v.accentLevel ?? 0),
+          enabled: v.accentEnabled !== false,
+          onChange: (n: number) => void scope.set("accentLevel", n),
+          onToggle: (on: boolean) => void scope.set("accentEnabled", on),
+        }),
+      ),
+      h(AiAccentPanel, {
+        value: v,
+        strength: Math.max(1, Number(v.accentLevel ?? 1)),
+        onSet: (field: string, val: unknown) => void scope.set(field, val),
+      }),
+      riskOpen ? riskModal : null,
+    );
+
+    return page === "home" ? home : page === "images" ? imagesPage : aiPage;
   };
 }
 

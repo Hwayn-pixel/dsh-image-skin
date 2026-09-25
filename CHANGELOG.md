@@ -19,6 +19,11 @@ OpenAI / FLUX / Stability / 自定义），设置页里能检测环境变量有�
 An accent pass over the interface skeleton, plus AI-generated ornament borders.
 
 ### Added
+- **Two-level settings screen.** Level one is a choice — 「贴图」for the artwork, 「AI 纹样」for the
+  ornament — instead of everything stacked on one page. The AI entry is locked while the window
+  region has no image (the ornament samples its palette from that image), and entering it raises a
+  five-line pre-flight notice about what leaves the machine, what costs money and what stays local;
+  「不再显示」persists that choice. The generator itself is no longer visible from level one.
 - **Accent (level 0, local).** A palette is extracted from whatever artwork is on the window and
   painted onto the skeleton — buttons, inputs, dialogs, rails. Extraction weights colours by
   **saturation × mid-lightness** rather than raw pixel count, so a night sky does not turn the whole
@@ -50,6 +55,9 @@ An accent pass over the interface skeleton, plus AI-generated ornament borders.
   `POST /gen` are driven through a scripted `fetch`, covering the happy path (data URI and remote
   URL, clamped count, forwarded size, key precedence) and the failure paths (unknown provider,
   custom without URL/model, no key anywhere, a reply with no images, 401, unreachable host).
+- The browser suite grew from 11 to 19: the AI gate (`windowHasArtwork`) is pinned for a shared
+  image, a light-only image, a dark-only image, an empty string, and for other regions that must
+  *not* unlock the AI screen.
 
 ## 0.3.0 — 2026-09-24
 
