@@ -18,6 +18,26 @@ OpenAI / FLUX / Stability / 自定义），设置页里能检测环境变量有�
 
 An accent pass over the interface skeleton, plus AI-generated ornament borders.
 
+### Changed
+- **The accent is a scheme now, not a coat of paint.** The first version painted the sampled wallpaper
+  colours straight onto the skeleton — one hue per element, plus a diagonal stripe texture and a thick
+  ornament frame around every button, including 30px ones. It read as a colour clash, and fairly so.
+  What replaced it:
+  - the sampler's four colours are reduced to **one hue**, and every role is rebuilt from it, with
+    lightness walked until each colour actually separates from the surface behind it;
+  - **no textures** — a single soft sheen on controls at most;
+  - control hairlines are drawn with `outline` + `:not(:focus-visible)`, so they cost no layout, never
+    eat a control's own box-shadow, and leave the focus ring alone;
+  - **ornament goes where there is room**: panels (dialogs, menus, settings sections) wear the frame,
+    controls never do;
+  - the ladder is visible step by step now: tint and hairline strength rise per level, panels go
+    tick → bracket → generated ornament.
+- **The settings dialog is decorated at last.** The scan only ran on a settings change or theme flip,
+  so chrome that appeared later — the settings dialog, menus, popovers — was never marked. The
+  throttled repaint pass now re-stamps the accent too.
+- **The level descriptions match what actually happens**: 0-2 are drawn on your machine, 3-4 hand the
+  frame to the generated ornament. The old copy credited the model for all four.
+
 ### Added
 - **Entry cards carry state.** Level one answers "where am I up to?" without a click: the 贴图 card shows
   how many areas are configured, the AI card shows the current level (or that decoration is off).
