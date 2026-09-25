@@ -2481,9 +2481,18 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       );
 
     // Shown before anything is generated, every time you come in, until "不再显示" is ticked.
+    // Clicking the dim area closes it like a dialog should: a backdrop that swallows clicks with no
+    // way out reads as "the UI is broken", which is exactly how it was reported.
     const riskModal = h(
       "div",
-      { className: "dshImgSkin-modal", role: "dialog", "aria-modal": "true" },
+      {
+        className: "dshImgSkin-modal",
+        role: "dialog",
+        "aria-modal": "true",
+        onClick: (e: any) => {
+          if (e.target === e.currentTarget) setRiskOpen(false);
+        },
+      },
       h(
         "div",
         {
@@ -2520,6 +2529,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
             },
             "不再显示",
           ),
+          h("span", { className: "dshImgSkin-hint" }, "点背景或按 Esc 也能关掉"),
         ),
       ),
     );
