@@ -176,7 +176,8 @@ function ensureBaseStyles(): void {
     ".dshImgSkin-btn[data-variant='primary']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);color:var(--dsw-alias-brand-primary,#5aa7d8)}",
     ".dshImgSkin-btn[data-variant='quiet']{border-color:transparent;opacity:.7}",
     ".dshImgSkin-btn[data-variant='quiet']:hover{opacity:1;background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}",
-    ".dshImgSkin-switch{display:inline-flex;align-items:center;gap:6px;font-size:12px;opacity:.85;cursor:pointer;user-select:none}",
+    ".dshImgSkin-switch{display:inline-flex;align-items:center;gap:6px;font-size:12px;opacity:.85;cursor:pointer;user-select:none;white-space:nowrap}",
+    ".dshImgSkin-switch input{flex:0 0 auto}",
     ".dshImgSkin-slider{display:flex;flex-direction:column;gap:6px}",
     ".dshImgSkin-slider input[type=range]{width:100%;margin:0}",
     ".dshImgSkin-sliderhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px}",
@@ -236,8 +237,10 @@ function ensureBaseStyles(): void {
     ".dshImgSkin-tag[data-kind='tip']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);",
     "color:var(--dsw-alias-brand-primary,#5aa7d8);opacity:1;margin-left:6px}",
     ".dshImgSkin-tipTitle{font-size:12.5px;font-weight:600}",
-    ".dshImgSkin-swatch{width:15px;height:15px;border-radius:5px;display:inline-block;",
-    "border:1px solid var(--dsw-alias-border-l1,rgba(128,128,128,.3))}",
+    ".dshImgSkin-swatch{width:15px;height:15px;border-radius:5px;display:inline-block;box-sizing:border-box;",
+    "border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.5));box-shadow:inset 0 0 0 1px rgba(0,0,0,.12)}",
+    ".dshImgSkin-swatchRow{display:flex;flex-direction:column;gap:4px}",
+    ".dshImgSkin-swatchRow .dshImgSkin-hint{margin-top:0}",
     ".dshImgSkin-field{display:grid;grid-template-columns:78px minmax(0,1fr);gap:6px 10px;align-items:start}",
     ".dshImgSkin-fieldLabel{font-size:12px;opacity:.68;padding-top:6px}",
     ".dshImgSkin-fieldBody{display:flex;flex-direction:column;gap:4px;min-width:0}",
@@ -631,6 +634,19 @@ function applyPanelOpacity(value: SkinValue, mode: Mode): void {
     // list, the sidebar kept its opaque fill and stayed white however low the slider went.
     `  --dsw-specific-sidebar-fill: rgba(${rgb}, ${l(0)});`,
     `  --dsw-specific-app-shell: rgba(${rgb}, ${Math.max(0, a - 0.2).toFixed(3)});`,
+    `}`,
+    // The settings dialog is where the opacity slider lives, so letting it inherit the slider's
+    // translucency made the one screen you configure from the hardest to read - and the wallpaper
+    // showed through the panel edges (the "穿模" he pointed at). Inside a dialog the tokens go back
+    // to opaque; the rest of the app still follows the slider.
+    `body[${BODY_ATTR}] [role="dialog"]{`,
+    `  --dsw-alias-bg-base: rgb(${rgb});`,
+    `  --dsw-alias-bg-layer-1: rgb(${rgb});`,
+    `  --dsw-alias-bg-layer-2: rgba(${rgb}, ${l(0.08)});`,
+    `  --dsw-alias-bg-layer-3: rgba(${rgb}, ${l(0.05)});`,
+    `  --dsw-alias-bg-overlay: rgba(${rgb}, ${l(0.55)});`,
+    `  --dsw-specific-sidebar-fill: rgb(${rgb});`,
+    `  --dsw-specific-app-shell: rgb(${rgb});`,
     `}`,
     // A few DSH surfaces paint a hard-coded colour instead of reading the theme tokens, so
     // overriding tokens alone leaves them opaque and the wallpaper invisible behind them.
@@ -2712,12 +2728,16 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
         sampledColours.length
           ? h(
               "div",
-              { className: "dshImgSkin-inline" },
-              h("span", { className: "dshImgSkin-fitlabel" }, "取自壁纸"),
-              ...sampledColours.map((c, i) =>
-                h("span", { key: `s${i}`, className: "dshImgSkin-swatch", style: { background: `rgb(${c})` }, title: c }),
+              { className: "dshImgSkin-swatchRow" },
+              h(
+                "div",
+                { className: "dshImgSkin-inline" },
+                h("span", { className: "dshImgSkin-fitlabel" }, "取自壁纸"),
+                ...sampledColours.map((c, i) =>
+                  h("span", { key: `s${i}`, className: "dshImgSkin-swatch", style: { background: `rgb(${c})` }, title: c }),
+                ),
               ),
-              h("span", { className: "dshImgSkin-hint" }, "装饰配色由这几种色归纳成一个主色，再按角色分配"),
+              h("span", { className: "dshImgSkin-hint" }, "装饰配色由这几种色归纳成一个主色，再按角色分配；偏白的色也留着，做高光和分隔线"),
             )
           : null,
       ),
