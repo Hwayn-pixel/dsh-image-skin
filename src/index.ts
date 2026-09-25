@@ -75,6 +75,182 @@ const EXTENSIONS: Record<string, string> = {
 const FILE_RE = /^[0-9a-f-]+\.(png|jpg|jpeg|gif|webp|svg|avif|mp4|webm)$/i;
 const FILE_URL_RE = /\/dsh-image-skin\/files\/([^/?#"\s]+)/g;
 
+// ── text-to-image providers ─────────────────────────────────────────────────
+//
+// The accent feature needs ornamental artwork, which code cannot draw convincingly: a CSS
+// gradient reads as a dashed "disabled" outline, while a real ornament needs art. So the levels
+// are generation *strength*, and the drawing is delegated to a model the user picks.
+//
+// Almost every service now exposes an OpenAI-shaped /images/generations endpoint, so one adapter
+// covers most of them; Ark (Volcengine Seedream) is close enough to reuse it with a different
+// body. "custom" lets the user point at anything else with the same shape - provider hubs in
+// particular - without shipping an adapter for each.
+
+type ProviderKind = "openai" | "ark";
+
+interface ProviderDef {
+  id: string;
+  label: string;
+  kind: ProviderKind;
+  baseUrl: string;
+  model: string;
+  /** Env var that may hold the key; when set, the key box in the UI is read-only. */
+  keyEnv?: string;
+  docs?: string;
+}
+
+const PROVIDERS: ProviderDef[] = [
+  { id: "ark-seedream", label: "火山方舟 Seedream（豆包）", kind: "ark",
+    baseUrl: "https://ark.cn-beijing.volces.com/api/v3", model: "doubao-seedream-4-0-250828", keyEnv: "ARK_API_KEY" },
+  { id: "dashscope-wanx", label: "通义万相（阿里）", kind: "openai",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "wanx2.1-t2i-turbo", keyEnv: "DASHSCOPE_API_KEY" },
+  { id: "zhipu-cogview", label: "智谱 CogView", kind: "openai",
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4", model: "cogview-3-plus", keyEnv: "ZHIPUAI_API_KEY" },
+  { id: "hunyuan-image", label: "腾讯混元生图", kind: "openai",
+    baseUrl: "https://api.hunyuan.cloud.tencent.com/v1", model: "hunyuan-image", keyEnv: "HUNYUAN_API_KEY" },
+  { id: "openai-image", label: "OpenAI gpt-image", kind: "openai",
+    baseUrl: "https://api.openai.com/v1", model: "gpt-image-1", keyEnv: "OPENAI_API_KEY" },
+  { id: "flux-bfl", label: "FLUX（Black Forest Labs）", kind: "openai",
+    baseUrl: "https://api.bfl.ai/v1", model: "flux-pro-1.1", keyEnv: "BFL_API_KEY" },
+  { id: "stability", label: "Stability（SD 系列）", kind: "openai",
+    baseUrl: "https://api.stability.ai/v2beta", model: "sd3.5-large", keyEnv: "STABILITY_API_KEY" },
+  { id: "custom", label: "自定义（OpenAI 兼容）", kind: "openai", baseUrl: "", model: "" },
+];
+
+/** Generation strength: how busy the ornament should be. Maps to prompt wording, nothing else. */
+const STRENGTHS = [
+  "a restrained thin border line with a small corner motif",
+  "an ornamental border frame with a clear corner motif and a repeating edge figure",
+  "a rich layered ornamental border with ornate corner flourishes and an intricate repeating edge",
+  "an elaborate ornamental frame with embossed depth, dense scrollwork and jewelled corner pieces",
+];
+
+const GEN_SUBJECT = [
+  "seamless decorative border pattern",
+  "flat vector ornament",
+  "perfectly symmetrical corners",
+  "uniform repeating edges",
+  "no text", "no letters", "no numbers", "no people", "no animals", "no faces",
+  "no scenery", "no objects", "no watermark", "no signature",
+].join(", ");
+
+/** Compose the prompt for one generation. Kept here so the wording is versionable. */
+function buildPrompt(style: string, palette: string[], strength: number, extra: string): string {
+  const colours = palette.length ? `colour palette ${palette.join(" / ")}` : "colours sampled from the wallpaper";
+  return [
+    STRENGTHS[Math.max(0, Math.min(STRENGTHS.length - 1, strength - 1))] ?? STRENGTHS[1],
+    GEN_SUBJECT,
+    colours,
+    style ? `style: ${style}` : "",
+    extra ? `notes: ${extra}` : "",
+  ].filter(Boolean).join(". ");
+}
+
+interface GenRequest {
+  providerId?: string;
+  baseUrl?: string;
+  model?: string;
+  apiKey?: string;
+  apiKeyEnv?: string;
+  prompt: string;
+  count?: number;
+  size?: string;
+}
+
+/** Resolve a provider by id, letting an inline override replace the preset's URL/model. */
+function resolveProvider(req: GenRequest): ProviderDef | null {
+  const preset = PROVIDERS.find((p) => p.id === (req.providerId ?? "")) ?? null;
+  if (!preset) return null;
+  const baseUrl = (req.baseUrl ?? "").trim() || preset.baseUrl;
+  const model = (req.model ?? "").trim() || preset.model;
+  if (!baseUrl || !model) return null;                 // custom without both is unusable
+  return { ...preset, baseUrl, model };
+}
+
+/**
+ * Read the key for a provider: an env var (Windows and POSIX casing both tried) first, then the
+ * value the user typed. Env vars are the safer source because the key never enters the settings
+ * file at all.
+ */
+function resolveKey(req: GenRequest, provider: ProviderDef): { key: string; from: "env" | "settings" | "none" } {
+  const names = [req.apiKeyEnv, provider.keyEnv].filter((n): n is string => Boolean(n));
+  for (const name of names) {
+    const value = process.env[name] ?? process.env[name.toUpperCase()] ?? process.env[name.toLowerCase()];
+    if (value && value.trim()) return { key: value.trim(), from: "env" };
+  }
+  const typed = (req.apiKey ?? "").trim();
+  if (typed) return { key: typed, from: "settings" };
+  return { key: "", from: "none" };
+}
+
+/** POST one generation request and normalise whatever comes back into image bytes. */
+async function callProvider(
+  provider: ProviderDef,
+  key: string,
+  body: { prompt: string; count: number; size: string },
+): Promise<{ ok: true; images: string[] } | { ok: false; error: string }> {
+  const url = `${provider.baseUrl.replace(/\/+$/, "")}/images/generations`;
+  const payload = provider.kind === "ark"
+    ? { model: provider.model, prompt: body.prompt, size: body.size, response_format: "url", watermark: false }
+    : { model: provider.model, prompt: body.prompt, n: body.count, size: body.size, response_format: "url" };
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(120_000),
+    });
+  } catch (error) {
+    return { ok: false, error: `请求失败：${(error as Error).message}` };
+  }
+  const text = await res.text();
+  if (!res.ok) {
+    return { ok: false, error: `${provider.label} 返回 ${res.status}：${text.slice(0, 300)}` };
+  }
+  let parsed: any;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { ok: false, error: `无法解析响应：${text.slice(0, 200)}` };
+  }
+  const items: any[] = parsed?.data ?? parsed?.images ?? parsed?.output ?? [];
+  const images: string[] = [];
+  for (const item of items) {
+    if (typeof item === "string") images.push(item);
+    else if (typeof item?.url === "string") images.push(item.url);
+    else if (typeof item?.b64_json === "string") images.push(`data:image/png;base64,${item.b64_json}`);
+  }
+  if (!images.length) return { ok: false, error: `响应里没有图片：${text.slice(0, 200)}` };
+  return { ok: true, images };
+}
+
+/** Save a remote image or data URI into the skin directory and return its public URL. */
+async function storeImage(src: string): Promise<{ url: string; filename: string } | null> {
+  let bytes: Buffer;
+  let ext = "png";
+  if (src.startsWith("data:")) {
+    const m = /^data:image\/([a-z0-9.+-]+);base64,(.+)$/s.exec(src);
+    if (!m) return null;
+    ext = EXTENSIONS[`image/${m[1].toLowerCase()}`] ?? "png";
+    bytes = Buffer.from(m[2], "base64");
+  } else {
+    try {
+      const res = await fetch(src, { signal: AbortSignal.timeout(60_000) });
+      if (!res.ok) return null;
+      const type = (res.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+      ext = EXTENSIONS[type] ?? "png";
+      bytes = Buffer.from(await res.arrayBuffer());
+    } catch {
+      return null;
+    }
+  }
+  if (!bytes.length) return null;
+  const filename = `${randomUUID()}.${ext}`;
+  writeFileSync(join(skinDir(), filename), bytes);
+  return { url: `${ROUTE_PREFIX}/files/${filename}`, filename };
+}
+
 function skinDir(): string {
   const base = process.env.DSH_HOME || join(homedir(), ".dsh");
   const dir = join(base, DIR_NAME);
@@ -191,6 +367,71 @@ export function apply(ctx: HostContext): void {
               res.end(payload);
             };
             try {
+              // GET /dsh-image-skin/providers — presets plus which ones already have a key.
+              if (req.method === "GET" && url.pathname === `${ROUTE_PREFIX}/providers`) {
+                const list = PROVIDERS.map((p) => {
+                  const envNames = [p.keyEnv].filter((n): n is string => Boolean(n));
+                  const envFound = envNames.find((n) => {
+                    const v = process.env[n] ?? process.env[n.toUpperCase()] ?? process.env[n.toLowerCase()];
+                    return Boolean(v && v.trim());
+                  });
+                  return {
+                    id: p.id,
+                    label: p.label,
+                    kind: p.kind,
+                    baseUrl: p.baseUrl,
+                    model: p.model,
+                    keyEnv: p.keyEnv ?? null,
+                    envReady: Boolean(envFound),
+                  };
+                });
+                return ok(200, { providers: list, strengths: STRENGTHS.length });
+              }
+              // POST /dsh-image-skin/gen — generate ornament with the chosen provider.
+              if (req.method === "POST" && url.pathname === `${ROUTE_PREFIX}/gen`) {
+                let body: string;
+                try {
+                  body = await readBody(req, 256 * 1024);
+                } catch (error) {
+                  if ((error as { code?: string }).code === "E_TOO_LARGE") return ok(413, { error: "请求过大" });
+                  throw error;
+                }
+                const payload = JSON.parse(body) as GenRequest;
+                if (!payload?.prompt || typeof payload.prompt !== "string") {
+                  return ok(400, { error: "missing prompt" });
+                }
+                const provider = resolveProvider(payload);
+                if (!provider) return ok(400, { error: "未知的服务商，或自定义服务商缺少 Base URL / 模型 ID" });
+                const { key, from } = resolveKey(payload, provider);
+                if (!key) {
+                  return ok(400, {
+                    error: `没有找到 ${provider.label} 的 API Key：请在上面填入，或设置环境变量 ${provider.keyEnv ?? "（自定义）"}`,
+                  });
+                }
+                const count = Math.max(1, Math.min(4, Math.round(Number(payload.count) || 1)));
+                const size = typeof payload.size === "string" && /^\d{2,4}x\d{2,4}$/.test(payload.size) ? payload.size : "1024x1024";
+                const result = await callProvider(provider, key, { prompt: payload.prompt, count, size });
+                if ("error" in result) return ok(502, { error: result.error, keyFrom: from });
+                const saved: string[] = [];
+                for (const src of result.images) {
+                  const stored = await storeImage(src);
+                  if (stored) saved.push(stored.url);
+                }
+                if (!saved.length) return ok(502, { error: "生成成功但图片保存失败（可能是无法访问的临时链接）" });
+                return ok(200, { urls: saved, provider: provider.id, model: provider.model, keyFrom: from });
+              }
+              // POST /dsh-image-skin/prompt — compose the prompt without generating (preview in UI).
+              if (req.method === "POST" && url.pathname === `${ROUTE_PREFIX}/prompt`) {
+                const body = await readBody(req, 64 * 1024);
+                const p = JSON.parse(body) as { style?: string; palette?: string[]; strength?: number; extra?: string };
+                const prompt = buildPrompt(
+                  String(p.style ?? ""),
+                  Array.isArray(p.palette) ? p.palette.slice(0, 6).map(String) : [],
+                  Number(p.strength) || 2,
+                  String(p.extra ?? ""),
+                );
+                return ok(200, { prompt });
+              }
               // POST /dsh-image-skin/upload { image: "data:image/png;base64,..." }
               if (req.method === "POST" && url.pathname === `${ROUTE_PREFIX}/upload`) {
                 let body: string;

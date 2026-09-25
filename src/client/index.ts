@@ -99,6 +99,11 @@ const REGION_SELECTORS: Record<string, string[]> = {
 };
 
 const STYLE_ID = "dsh-image-skin-styles";
+/**
+ * Bumped by every apply(). A cleanup from an older instance must not tear down DOM that a
+ * newer instance just installed - see the guard in apply().
+ */
+let applyGeneration = 0;
 /** Marks the brief window in which colour-bearing properties transition (theme cross-fade). */
 const THEME_ANIM_ATTR = "data-dsh-skin-theme-anim";
 const THEME_ANIM_MS = 320;
@@ -174,6 +179,36 @@ function ensureBaseStyles(): void {
     ".dshImgSkin-slider input[type=range]{width:100%;margin:0}",
     ".dshImgSkin-sliderhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px}",
     ".dshImgSkin-value{font-size:12px;font-variant-numeric:tabular-nums;opacity:.75}",
+    ".dshImgSkin-range{width:100%;margin:2px 0 0}",
+    ".dshImgSkin-range:disabled{opacity:.45}",
+    ".dshImgSkin-ticks{display:flex;justify-content:space-between;gap:4px;margin-top:-2px}",
+    ".dshImgSkin-tickBtn{cursor:pointer;border:0;background:transparent;color:inherit;font:inherit;font-size:11px;",
+    "opacity:.5;padding:2px 6px;border-radius:6px;white-space:nowrap}",
+    ".dshImgSkin-tickBtn:hover{opacity:.85}",
+    ".dshImgSkin-tickBtn[data-on='true']{opacity:1;font-weight:600}",
+    ".dshImgSkin-tickBtn:disabled{cursor:default;opacity:.3}",
+    ".dshImgSkin-accentCaption{font-size:12px;line-height:1.6;min-height:20px;",
+    "transition:opacity .14s ease;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px}",
+    ".dshImgSkin-accentCaption[data-visible='false']{opacity:0}",
+    ".dshImgSkin-accentLevel{font-weight:600;opacity:.9}",
+    ".dshImgSkin-field{display:grid;grid-template-columns:78px minmax(0,1fr);gap:6px 10px;align-items:start}",
+    ".dshImgSkin-fieldLabel{font-size:12px;opacity:.68;padding-top:6px}",
+    ".dshImgSkin-fieldBody{display:flex;flex-direction:column;gap:4px;min-width:0}",
+    ".dshImgSkin-input{cursor:pointer;padding:5px 9px;border-radius:8px;font:inherit;font-size:12.5px;width:100%;",
+    "border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));background:var(--dsw-alias-bg-layer-1,transparent);",
+    "color:inherit}",
+    ".dshImgSkin-input:disabled{opacity:.55;cursor:default}",
+    ".dshImgSkin-inputNarrow{width:auto;min-width:88px}",
+    ".dshImgSkin-inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}",
+    ".dshImgSkin-promptBox{font-size:11px;line-height:1.6;opacity:.7;padding:8px 10px;border-radius:8px;",
+    "background:color-mix(in srgb,currentColor 6%,transparent);word-break:break-word}",
+    ".dshImgSkin-results{display:flex;gap:8px;flex-wrap:wrap}",
+    ".dshImgSkin-result{cursor:pointer;padding:0;border-radius:10px;overflow:hidden;",
+    "border:2px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));background:transparent;line-height:0}",
+    ".dshImgSkin-result:hover{border-color:var(--dsw-alias-brand-primary,#5aa7d8)}",
+    ".dshImgSkin-result[data-on='true']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);",
+    "box-shadow:0 0 0 2px var(--dsw-alias-brand-primary,#5aa7d8)}",
+    ".dshImgSkin-result img{width:118px;height:74px;object-fit:cover;display:block}",
     ".dshImgSkin-fit{display:inline-flex;align-items:center;gap:5px}",
     ".dshImgSkin-fitlabel{font-size:11.5px;opacity:.55}",
     "[data-dsh-skin-editing='true']{outline:2px dashed var(--dsw-alias-brand-primary,#5aa7d8);outline-offset:2px}",
@@ -537,7 +572,344 @@ function applyPanelOpacity(value: SkinValue, mode: Mode): void {
     `  --dsw-specific-sidebar-fill: rgba(${rgb}, ${l(0)});`,
     `  --dsw-specific-app-shell: rgba(${rgb}, ${Math.max(0, a - 0.2).toFixed(3)});`,
     `}`,
+    // A few DSH surfaces paint a hard-coded colour instead of reading the theme tokens, so
+    // overriding tokens alone leaves them opaque and the wallpaper invisible behind them.
+    // The welcome card is the obvious one: an opaque #fff card sitting right on top of the
+    // backdrop. Re-point them at the same token, and they follow the slider like everything
+    // else.
+    `body[${BODY_ATTR}] [class*="_card"]{`,
+    "  background-color: var(--dsw-alias-bg-layer-1, transparent) !important;",
+    `}`,
   ].join("\n");
+}
+
+// ── accent: decoration for controls, buttons and popovers ───────────────────
+//
+// The wallpaper alone leaves the UI skeleton looking pasted on: buttons and popovers keep
+// their default fill and the whole thing reads as a photo behind a white app. This module
+// derives a palette from whatever artwork is on the window, then paints that palette onto the
+// small framed things - buttons, rows of controls, dialogs, menus, settings sections - so the
+// chrome belongs to the picture.
+//
+// Levels are deliberately cheap first: 0-2 are computed locally (no network, no key), and only
+// level 3 would call an image model.
+
+const ACCENT_STYLE_ID = "dsh-image-skin-accent";
+const ACCENT_ATTR = "data-dsh-skin-accent";
+const ACCENT_MARK = "data-dsh-accent";
+
+interface AccentLevelDef {
+  name: string;
+  desc: string;
+  ready: boolean;
+}
+
+/** Level 0 is local palette extraction; levels 1..4 ask the image model to generate an ornament. */
+const ACCENT_LEVELS: AccentLevelDef[] = [
+  { name: "取色", desc: "只把按钮与面板染成壁纸的色调（本机计算，不联网）", ready: true },
+  { name: "轻纹样", desc: "AI 生成：一条细边框线 + 小角饰", ready: true },
+  { name: "标准", desc: "AI 生成：完整装饰框，角花 + 连续边饰", ready: true },
+  { name: "华丽", desc: "AI 生成：多层纹样，繁复卷草", ready: true },
+  { name: "极致", desc: "AI 生成：浮雕质感 + 珠宝式角饰", ready: true },
+];
+
+/** Elements that make up the "skeleton" and deserve the accent. */
+const ACCENT_SELECTOR = [
+  'button',
+  'select',
+  'input[type="text"]',
+  'input[type="search"]',
+  '[role="button"]',
+  '[role="dialog"]',
+  '[role="menu"]',
+  '[role="listbox"]',
+  '[role="menuitem"]',
+  '[role="option"]',
+  '[data-settings-section]',
+  'main > section',
+  '[role="main"] > section',
+].join(",");
+
+/** Our own chrome and links must never be re-decorated. */
+const ACCENT_EXCLUDE = `[data-dsh-skin-chrome],[data-dsh-skin-chrome] *,[data-dsh-skin-sticker],[data-dsh-skin-sticker] *,a,[role="link"]`;
+
+const paletteCache = new Map<string, string[]>();
+let accentTargets: HTMLElement[] = [];
+
+/**
+ * Reduce an image to a handful of representative colours. A 4-bit bucket histogram over a
+ * 64px-wide sampling is plenty for tinting chrome and costs a few milliseconds.
+ */
+async function extractPalette(url: string): Promise<string[]> {
+  const cached = paletteCache.get(url);
+  if (cached) return cached;
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.src = url;
+  try {
+    await img.decode();
+  } catch {
+    return [];
+  }
+  const w = 64;
+  const h = Math.max(1, Math.round((64 * img.height) / Math.max(1, img.width)));
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return [];
+  ctx.drawImage(img, 0, 0, w, h);
+  let data: Uint8ClampedArray;
+  try {
+    data = ctx.getImageData(0, 0, w, h).data;
+  } catch {
+    return [];                                  // tainted canvas — treat as "no palette"
+  }
+  const buckets = new Map<string, { n: number; r: number; g: number; b: number }>();
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 200) continue;
+    const key = `${data[i] >> 4},${data[i + 1] >> 4},${data[i + 2] >> 4}`;
+    const e = buckets.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
+    e.n += 1;
+    e.r += data[i];
+    e.g += data[i + 1];
+    e.b += data[i + 2];
+    buckets.set(key, e);
+  }
+  // Pick colours by *presence in the picture* x *how usable they are as a tint*, not by raw
+  // pixel count. A night sky is mostly near-black, so "the most common colour" is usually a
+  // muddy dark grey that makes the whole UI look dirty; the aurora's green is far rarer but is
+  // the colour a person actually sees in that image.
+  const score = (r: number, g: number, b: number): number => {
+    const col = [r, g, b];
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const sat = max === 0 ? 0 : (max - min) / max;           // chroma, 0..1
+    const lig = (max + min) / 510;                           // lightness, 0..1
+    const mid = Math.max(0, 1 - Math.abs(lig - 0.55) * 1.8); // prefer mid-tones
+    return sat * mid;
+  };
+  const palette = [...buckets.values()]
+    .map((e) => {
+      const r = e.r / e.n;
+      const g = e.g / e.n;
+      const b = e.b / e.n;
+      return { r, g, b, n: e.n, weight: e.n * (0.25 + score(r, g, b)) };
+    })
+    .sort((a, b) => b.weight - a.weight)
+    .slice(0, 4)
+    .map((e) => `${Math.round(e.r)}, ${Math.round(e.g)}, ${Math.round(e.b)}`);
+  paletteCache.set(url, palette);
+  return palette;
+}
+
+function visible(el: HTMLElement): boolean {
+  const rect = el.getBoundingClientRect();
+  if (rect.width < 8 || rect.height < 8) return false;
+  const cs = getComputedStyle(el);
+  return cs.visibility !== "hidden" && cs.display !== "none" && Number(cs.opacity) > 0.05;
+}
+
+/** Mark the on-screen skeleton elements, stamping each with the accent attribute. */
+function scanAccentTargets(): HTMLElement[] {
+  const found = new Set<HTMLElement>();
+  const usable = (el: HTMLElement): boolean => !el.closest(ACCENT_EXCLUDE) && visible(el);
+
+  document.querySelectorAll<HTMLElement>(ACCENT_SELECTOR).forEach((el) => {
+    if (usable(el)) found.add(el);
+  });
+
+  // Fallback sweep: anything small that already draws a border is part of the skeleton too.
+  // The named selectors miss icon-only controls and one-off rows; sizing keeps big layout
+  // containers (which should stay plain) out of it. Elements we already marked last pass are
+  // trusted without re-measuring, so a toolbar that is mid-animation does not flicker out.
+  document.querySelectorAll<HTMLElement>("body *").forEach((el) => {
+    if (found.has(el)) return;
+    if (el.hasAttribute(ACCENT_MARK)) {
+      found.add(el);
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 360 || rect.height > 220 || rect.width < 6 || rect.height < 6) return;
+    if (!usable(el)) return;
+    const cs = getComputedStyle(el);
+    const bordered = (["Top", "Right", "Bottom", "Left"] as const).some((side) => {
+      const w = parseFloat(cs[`border${side}Width` as "borderTopWidth"]);
+      const s = cs[`border${side}Style` as "borderTopStyle"];
+      return w > 0 && s !== "none";
+    });
+    if (bordered) found.add(el);
+  });
+
+  // Consistency pass: a toolbar is a row of peers, but only some of them draw their own border
+  // (an icon-only button often relies on hover). Decorating two of three siblings looks like a
+  // bug, so once one member of a row is marked, its button-like siblings join it.
+  for (const el of [...found]) {
+    const parent = el.parentElement;
+    if (!parent) continue;
+    const pe = getComputedStyle(parent);
+    if (!/flex/.test(pe.display)) continue;
+    const siblings = [...parent.children].filter(
+      (c): c is HTMLElement => c instanceof HTMLElement && c !== el && c.matches("button, [role='button'], a"),
+    );
+    if (!siblings.length || siblings.length > 8) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width > 120 || rect.height > 120) continue;      // only cluster small peers
+    for (const sib of siblings) {
+      if (usable(sib)) found.add(sib);
+    }
+  }
+
+  return [...found];
+}
+
+/**
+ * Build a nine-slice decoration frame as an inline SVG data URI.
+ *
+ * A CSS gradient can only draw straight lines, which is why the first attempt read as a dashed
+ * "disabled" outline rather than ornament. SVG has no such limit: corners get a motif, edges get
+ * a repeating figure, and the whole thing is parameterised by the wallpaper palette. Used with
+ * `border-image`, the frame sits *outside* the element (border-image-outset) so it decorates
+ * without disturbing layout.
+ *
+ * @param corner  corner motif colour (rgba string)
+ * @param edge    edge figure colour (rgba string)
+ * @param ornate  true for the busier motif used by the higher level
+ */
+function frameDataUri(corner: string, edge: string, ornate: boolean): string {
+  const S = 96;          // slice artwork size; border-image-slice below must match
+  const C = 28;          // corner cell
+  const parts: string[] = [
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${S}" height="${S}" viewBox="0 0 ${S} ${S}">`,
+    `<g fill="none" stroke-linecap="round" stroke-linejoin="round">`,
+  ];
+
+  // Edge figures: a row of small lozenges along the top and left.
+  for (let i = C + 8; i < S - C - 4; i += 16) {
+    parts.push(`<path d="M ${i} 3 l 5 5 l -5 5 l -5 -5 z" fill="${edge}" stroke="none" opacity=".85"/>`);
+    parts.push(`<path d="M 3 ${i} l 5 5 l -5 5 l -5 -5 z" fill="${edge}" stroke="none" opacity=".85"/>`);
+  }
+  if (ornate) {
+    // A second, offset row for the richer level.
+    for (let i = C + 16; i < S - C - 4; i += 16) {
+      parts.push(`<circle cx="${i}" cy="11" r="1.7" fill="${corner}" stroke="none" opacity=".7"/>`);
+      parts.push(`<circle cx="11" cy="${i}" r="1.7" fill="${corner}" stroke="none" opacity=".7"/>`);
+    }
+  }
+
+  // Corner motif: a quarter rosette plus a short diagonal flourish.
+  parts.push(`<path d="M 4 4 h ${C - 6} a 6 6 0 0 1 6 6 v ${C - 6}" stroke="${corner}" stroke-width="2"/>`);
+  parts.push(`<path d="M 10 10 h ${ornate ? 10 : 7} M 10 10 v ${ornate ? 10 : 7}" stroke="${corner}" stroke-width="1.4" opacity=".8"/>`);
+  parts.push(
+    ornate
+      ? `<circle cx="19" cy="19" r="2.6" fill="${corner}" stroke="none"/><circle cx="26" cy="12" r="1.6" fill="${edge}" stroke="none"/>`
+      : `<circle cx="19" cy="19" r="1.8" fill="${corner}" stroke="none"/>`,
+  );
+
+  parts.push(`</g></svg>`);
+  return `url("data:image/svg+xml;charset=utf-8,${encodeURIComponent(parts.join(""))}")`;
+}
+
+function hexToRgb(triple: string): { r: number; g: number; b: number } {
+  const [r, g, b] = triple.split(",").map((n) => Number(n.trim()));
+  return { r: r || 128, g: g || 128, b: b || 128 };
+}
+
+/**
+ * Build the decoration rules. Levels 1 and 2 are pure CSS patterns so they cost nothing, need
+ * no assets and survive any resolution.
+ */
+function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: string): string {
+  const base = palette[0] ?? (mode === "dark" ? "90, 110, 140" : "150, 165, 190");
+  const alt = palette[1] ?? base;
+  const { r, g, b } = hexToRgb(base);
+  const { r: a2, g: g2, b: b2 } = hexToRgb(alt);
+  const tint = mode === "dark" ? 0.16 : 0.13;
+
+  const lines = [
+    `body[${BODY_ATTR}][${ACCENT_ATTR}] [${ACCENT_MARK}]{`,
+    `  border-color: rgba(${r}, ${g}, ${b}, .42) !important;`,
+    `}`,
+  ];
+
+  if (level === 0) {
+    lines.push(
+      `body[${BODY_ATTR}][${ACCENT_ATTR}] [${ACCENT_MARK}]{`,
+      `  background-color: rgba(${r}, ${g}, ${b}, ${tint}) !important;`,
+      `}`,
+    );
+  } else {
+    // A user-picked generated frame wins over anything we can draw: real ornament is art, and a
+    // model draws it far better than a gradient can. Otherwise fall back to the built-in SVG
+    // frame so the level still does something before the first generation.
+    const chosen = chosenFrame;
+    const frame = chosen
+      ? `url("${chosen}")`
+      : frameDataUri(`rgba(${r}, ${g}, ${b}, .92)`, `rgba(${a2}, ${g2}, ${b2}, .8)`, level >= 3);
+    const thick = chosen ? (level >= 3 ? 16 : level >= 2 ? 13 : 10) : level >= 2 ? 14 : 11;
+    lines.push(
+      `body[${BODY_ATTR}][${ACCENT_ATTR}] [${ACCENT_MARK}]{`,
+      `  background-color: rgba(${r}, ${g}, ${b}, ${tint}) !important;`,
+      `  background-image:`,
+      `    repeating-linear-gradient(45deg, rgba(${r}, ${g}, ${b}, .12) 0 1px, transparent 1px 9px) !important;`,
+      `  background-size: auto !important;`,
+      // The frame rides outside the box (outset) and is far thicker than the border itself, so
+      // it reads as ornament rather than as a state outline - and it costs no layout space.
+      `  border: 2px solid transparent !important;`,
+      `  border-image-source: ${frame} !important;`,
+      `  border-image-slice: ${chosen ? "30" : "28"} ${chosen ? "30" : "28"} ${chosen ? "30" : "28"} ${chosen ? "30" : "28"} fill !important;`,
+      `  border-image-width: ${thick}px !important;`,
+      `  border-image-outset: ${level >= 2 ? "5px" : "4px"} !important;`,
+      `  border-image-repeat: stretch !important;`,
+      `}`,
+    );
+  }
+  return lines.join("\n");
+}
+
+/** Reflect the configured level + artwork onto the skeleton. */
+async function applyAccent(value: SkinValue, mode: Mode): Promise<void> {
+  let style = document.getElementById(ACCENT_STYLE_ID) as HTMLStyleElement | null;
+  const raw = Number(value.accentLevel ?? 0);
+  const level = Number.isFinite(raw) ? Math.max(0, Math.min(3, Math.round(raw))) : 0;
+  const wallpaper = resolveAreaImage(value, "window", mode);
+
+  // Level 3 is not implemented yet: fall back to the richest local level rather than
+  // pretending to have decorated anything.
+  const effective = level === 3 ? 2 : level;
+
+  if (!wallpaper || value.accentEnabled === false) {
+    document.body.removeAttribute(ACCENT_ATTR);
+    style?.remove();
+    accentTargets.forEach((el) => el.removeAttribute(ACCENT_MARK));
+    accentTargets = [];
+    return;
+  }
+
+  const palette = await extractPalette(wallpaper);
+  if (!palette.length) {
+    document.body.removeAttribute(ACCENT_ATTR);
+    style?.remove();
+    return;
+  }
+
+  accentTargets = scanAccentTargets();
+  accentTargets.forEach((el) => el.setAttribute(ACCENT_MARK, ""));
+  document.body.setAttribute(ACCENT_ATTR, String(effective));
+
+  if (!style) {
+    style = document.createElement("style");
+    style.id = ACCENT_STYLE_ID;
+    document.head.append(style);
+  }
+  style.textContent = accentCss(palette, effective, mode, String(value.accentFrame ?? ""));
+}
+
+function disposeAccent(): void {
+  document.getElementById(ACCENT_STYLE_ID)?.remove();
+  document.body.removeAttribute(ACCENT_ATTR);
+  document.querySelectorAll<HTMLElement>(`[${ACCENT_MARK}]`).forEach((el) => el.removeAttribute(ACCENT_MARK));
+  accentTargets = [];
 }
 
 // ── regions ─────────────────────────────────────────────────────────────────
@@ -798,6 +1170,9 @@ function applyAll(value: SkinValue, editingId: string | null, commit: Commit, mo
     else applyRegionImage(area.id, value, mode, !fade);
   }
   scheduleWarmOtherMode(value, mode);
+  // Fire-and-forget: palette extraction awaits an image decode, and nothing on screen should
+  // wait for decoration to catch up.
+  void applyAccent(value, mode);
 }
 
 // ── repair pass ─────────────────────────────────────────────────────────────
@@ -1268,6 +1643,370 @@ function formatMb(bytes: number): string {
   return (bytes / 1024 / 1024).toFixed(1);
 }
 
+/**
+ * Accent level picker. A slider rather than four buttons, because the levels are ordered by
+ * cost and the description changes with the level - so the caption cross-fades as you drag
+ * instead of snapping, and a reserved level can say so without looking broken.
+ */
+function AccentRow(props: {
+  level: number;
+  enabled: boolean;
+  onChange: (n: number) => void;
+  onToggle: (on: boolean) => void;
+}): React.ReactElement {
+  const h = React.createElement;
+  const level = Math.max(0, Math.min(ACCENT_LEVELS.length - 1, Math.round(props.level)));
+  const [shown, setShown] = React.useState(level);
+  const [visible, setVisible] = React.useState(true);
+  const fadeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cross-fade the caption: fade the old label out, swap, fade the new one in.
+  React.useEffect(() => {
+    if (level === shown) return;
+    setVisible(false);
+    if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    fadeTimer.current = setTimeout(() => {
+      setShown(level);
+      setVisible(true);
+    }, 140);
+    return () => {
+      if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    };
+  }, [level, shown]);
+
+  React.useEffect(
+    () => () => {
+      if (fadeTimer.current) clearTimeout(fadeTimer.current);
+    },
+    [],
+  );
+
+  const def = ACCENT_LEVELS[shown];
+  return h(
+    "div",
+    { className: "dshImgSkin-slider" },
+    h(
+      "div",
+      { className: "dshImgSkin-sliderhead" },
+      h(
+        "div",
+        null,
+        h("span", { className: "dshImgSkin-title" }, "按钮 / 弹窗装饰"),
+        h(
+          "span",
+          { className: "dshImgSkin-hint" },
+          "根据窗口壁纸的配色，给按钮、弹窗和设置分区加底纹。档位越高越复杂；前几档在本机算，不联网。",
+        ),
+      ),
+      h(
+        "label",
+        { className: "dshImgSkin-switch" },
+        h("input", {
+          type: "checkbox",
+          checked: props.enabled,
+          onChange: (e: any) => props.onToggle(e.target.checked),
+        }),
+        "启用",
+      ),
+    ),
+    h("input", {
+      className: "dshImgSkin-range",
+      type: "range",
+      min: 0,
+      max: ACCENT_LEVELS.length - 1,
+      step: 1,
+      value: level,
+      disabled: !props.enabled,
+      onChange: (e: any) => props.onChange(Number(e.target.value)),
+    }),
+    h(
+      "div",
+      { className: "dshImgSkin-ticks" },
+      ACCENT_LEVELS.map((l, i) =>
+        h(
+          "button",
+          {
+            key: l.name,
+            type: "button",
+            className: "dshImgSkin-tickBtn",
+            "data-on": String(i === level),
+            disabled: !props.enabled,
+            onClick: () => props.onChange(i),
+          },
+          l.name,
+        ),
+      ),
+    ),
+    h(
+      "div",
+      { className: "dshImgSkin-accentCaption", "data-visible": String(visible) },
+      h("span", { className: "dshImgSkin-accentLevel" }, `${shown} · ${def.name}`),
+      def.ready ? " — " : " — ",
+      h("span", { className: "dshImgSkin-hint" }, def.desc),
+    ),
+  );
+}
+
+/**
+ * AI ornament panel: pick a provider, supply a key, choose a strength, generate, keep one.
+ *
+ * The key may come from an environment variable (read-only here, never persisted) or from this
+ * box. Everything network-facing happens in the host half - this component only sends the chosen
+ * provider id and, when in manual mode, the typed key.
+ */
+function AiAccentPanel(props: {
+  value: SkinValue;
+  onSet: (field: string, val: unknown) => void;
+  strength: number;
+}): React.ReactElement {
+  const h = React.createElement;
+  const v = props.value;
+  const [providers, setProviders] = React.useState<Array<Record<string, unknown>> | null>(null);
+  const [busy, setBusy] = React.useState(false);
+  const [status, setStatus] = React.useState<string | null>(null);
+  const [results, setResults] = React.useState<string[]>([]);
+  const [promptPreview, setPromptPreview] = React.useState<string | null>(null);
+
+  const providerId = String(v.accentProvider ?? "ark-seedream");
+  const keyMode = String(v.accentKeyMode ?? "env");
+  const current = providers?.find((p) => p.id === providerId) ?? null;
+  const isCustom = providerId === "custom";
+
+  React.useEffect(() => {
+    let alive = true;
+    void (async () => {
+      try {
+        const res = await fetch(`${ROUTE_PREFIX}/providers`);
+        const data = await res.json();
+        if (alive) setProviders(Array.isArray(data?.providers) ? data.providers : []);
+      } catch {
+        if (alive) setProviders([]);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  const promptBody = () => ({
+    strength: props.strength,
+    style: String(v.accentStyle ?? ""),
+    palette: String(v.accentPalette ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+    extra: String(v.accentPromptExtra ?? ""),
+  });
+
+  const fetchPrompt = async (): Promise<string> => {
+    const res = await fetch(`${ROUTE_PREFIX}/prompt`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(promptBody()),
+    });
+    const data = await res.json();
+    return String(data?.prompt ?? "");
+  };
+
+  const preview = async () => {
+    try {
+      setPromptPreview(await fetchPrompt());
+    } catch (error) {
+      setPromptPreview(`无法获取：${String(error)}`);
+    }
+  };
+
+  const generate = async () => {
+    setBusy(true);
+    setStatus("生成中…（一般 10-60 秒）");
+    setResults([]);
+    try {
+      const prompt = await fetchPrompt();
+      const res = await fetch(`${ROUTE_PREFIX}/gen`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          providerId,
+          baseUrl: String(v.accentBaseUrl ?? ""),
+          model: String(v.accentModel ?? ""),
+          apiKey: keyMode === "manual" ? String(v.accentApiKey ?? "") : "",
+          apiKeyEnv: String(v.accentKeyEnv ?? ""),
+          prompt,
+          count: Number(v.accentCount ?? 1),
+          size: String(v.accentSize ?? "1024x1024"),
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setStatus(`失败：${String(data?.error ?? res.status)}`);
+        return;
+      }
+      const urls: string[] = Array.isArray(data?.urls) ? data.urls : [];
+      setResults(urls);
+      setStatus(urls.length ? `生成完成 ${urls.length} 张 —— 点一下就用它作装饰框` : "没有返回图片");
+    } catch (error) {
+      setStatus(`失败：${String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const field = (key: string, label: string, node: React.ReactElement | null, hint?: string) =>
+    h(
+      "div",
+      { className: "dshImgSkin-field", key },
+      h("span", { className: "dshImgSkin-fieldLabel" }, label),
+      h("div", { className: "dshImgSkin-fieldBody" }, node, hint ? h("span", { className: "dshImgSkin-hint" }, hint) : null),
+    );
+
+  const textInput = (fieldName: string, opts: Record<string, unknown> = {}) =>
+    h("input", {
+      className: "dshImgSkin-input",
+      value: String(v[fieldName] ?? ""),
+      onChange: (e: any) => props.onSet(fieldName, e.target.value),
+      ...opts,
+    });
+
+  const envReady = Boolean(current?.envReady);
+  const envName = String(current?.keyEnv ?? "");
+
+  return h(
+    "div",
+    { className: "dshImgSkin-card" },
+    h(
+      "div",
+      { className: "dshImgSkin-cardhead" },
+      h(
+        "div",
+        null,
+        h("span", { className: "dshImgSkin-title" }, "AI 纹样（生成装饰）"),
+        h("p", { className: "dshImgSkin-sub" }, "用绘图模型生成真正的花纹，用作按钮与弹窗的装饰框；只生成纹样，不含内容。"),
+      ),
+      h("button", { className: "dshImgSkin-btn", type: "button", onClick: () => void preview() }, "预览提示词"),
+    ),
+
+    field(
+      "prov",
+      "服务商",
+      h(
+        "select",
+        {
+          className: "dshImgSkin-input",
+          value: providerId,
+          onChange: (e: any) => props.onSet("accentProvider", e.target.value),
+        },
+        (providers ?? []).map((p) => h("option", { key: String(p.id), value: String(p.id) }, String(p.label))),
+      ),
+      current ? (isCustom ? "自定义：下面填 Base URL 与模型 ID" : `默认模型 ${String(current.model)}`) : "加载中…",
+    ),
+
+    isCustom ? field("base", "Base URL", textInput("accentBaseUrl", { placeholder: "https://your-endpoint/v1" })) : null,
+    isCustom ? field("model", "模型 ID", textInput("accentModel", { placeholder: "your-model-id" })) : null,
+
+    field(
+      "keysrc",
+      "API Key",
+      h(
+        "div",
+        { className: "dshImgSkin-seg" },
+        (["env", "manual"] as const).map((m) =>
+          h(
+            "button",
+            {
+              key: m,
+              type: "button",
+              "data-on": String(keyMode === m),
+              onClick: () => props.onSet("accentKeyMode", m),
+            },
+            m === "env" ? "环境变量" : "手动输入",
+          ),
+        ),
+      ),
+      keyMode === "env"
+        ? envReady
+          ? `✓ 已检测到 ${envName}（只读，Key 不入设置文件）`
+          : `未检测到 ${envName || "对应环境变量"}；可切到手动输入`
+        : "Key 存本机设置文件，不会上传；但仍请注意本机安全",
+    ),
+
+    keyMode === "env"
+      ? field(
+          "envname",
+          "变量名",
+          textInput("accentKeyEnv", { placeholder: envName || "ARK_API_KEY", disabled: Boolean(envName) }),
+          "留空则用该服务商的默认变量名",
+        )
+      : field("key", "Key", textInput("accentApiKey", { type: "password", placeholder: "sk-..." })),
+
+    field(
+      "count",
+      "张数 / 尺寸",
+      h(
+        "div",
+        { className: "dshImgSkin-inline" },
+        h("input", {
+          className: "dshImgSkin-input dshImgSkin-inputNarrow",
+          type: "number",
+          min: 1,
+          max: 4,
+          value: String(v.accentCount ?? 1),
+          onChange: (e: any) => props.onSet("accentCount", Number(e.target.value)),
+        }),
+        h("span", { className: "dshImgSkin-hint" }, "张（1-4）"),
+        h(
+          "select",
+          {
+            className: "dshImgSkin-input dshImgSkin-inputNarrow",
+            value: String(v.accentSize ?? "1024x1024"),
+            onChange: (e: any) => props.onSet("accentSize", e.target.value),
+          },
+          ["1024x1024", "1280x720", "720x1280"].map((s) => h("option", { key: s, value: s }, s)),
+        ),
+      ),
+    ),
+
+    field("style", "风格（可选）", textInput("accentStyle", { placeholder: "art nouveau / 赛博霓虹 / 水墨 …" })),
+
+    promptPreview ? h("div", { className: "dshImgSkin-promptBox" }, promptPreview) : null,
+    status ? h("p", { className: "dshImgSkin-ok" }, status) : null,
+
+    h(
+      "div",
+      { className: "dshImgSkin-ops" },
+      h(
+        "button",
+        {
+          className: "dshImgSkin-btn",
+          type: "button",
+          "data-variant": "primary",
+          disabled: busy,
+          onClick: () => void generate(),
+        },
+        busy ? "生成中…" : "生成装饰",
+      ),
+    ),
+
+    results.length
+      ? h(
+          "div",
+          { className: "dshImgSkin-results" },
+          results.map((url, i) =>
+            h(
+              "button",
+              {
+                key: `${url}-${i}`,
+                type: "button",
+                className: "dshImgSkin-result",
+                "data-on": String(String(v.accentFrame ?? "") === url),
+                title: "点击应用这张",
+                onClick: () => props.onSet("accentFrame", url),
+              },
+              h("img", { src: url, alt: "" }),
+            ),
+          ),
+        )
+      : null,
+  );
+}
+
+
 function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => React.ReactElement {
   const h = React.createElement;
   return function ImageSkinSection(): React.ReactElement {
@@ -1446,7 +2185,19 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           onPreview: (n: number) => previewVideoRate(n),
           onCommit: (n: number) => void scope.set("videoPlaybackRate", n),
         }),
+        h(AccentRow, {
+          key: "accent",
+          level: Number(v.accentLevel ?? 0),
+          enabled: v.accentEnabled !== false,
+          onChange: (n: number) => void scope.set("accentLevel", n),
+          onToggle: (on: boolean) => void scope.set("accentEnabled", on),
+        }),
       ),
+      h(AiAccentPanel, {
+        value: v,
+        strength: Math.max(1, Number(v.accentLevel ?? 1)),
+        onSet: (field: string, val: unknown) => void scope.set(field, val),
+      }),
       h(
         "div",
         { className: "dshImgSkin-card" },
@@ -1520,9 +2271,11 @@ function disposeSkinDom(): void {
   currentEditing = null;
   document.getElementById(STYLE_ID)?.remove();
   document.getElementById(PANEL_STYLE_ID)?.remove();
+  disposeAccent();
 }
 
 export function apply(ctx: ClientContext): void {
+  const generation = ++applyGeneration;
   ensureBaseStyles();
   document.body.setAttribute(BODY_ATTR, "");
   const scope = ctx.settingsScope.bind<SkinValue>({ namespace: NS });
@@ -1587,6 +2340,12 @@ export function apply(ctx: ClientContext): void {
           clearTimeout(themeAnimTimer);
           themeAnimTimer = null;
         }
+        // Everything above is per-instance wiring and always has to go. Everything below owns
+        // the DOM, and only the newest instance is allowed to touch it: if a previous apply()
+        // has already been superseded, its cleanup used to remove the body flag and panel
+        // stylesheet the new instance had just installed, which silently killed every
+        // `body[data-dsh-image-skin] …` rule and left the panels opaque.
+        if (generation !== applyGeneration) return;
         document.body.removeAttribute(THEME_ANIM_ATTR);
         paintedWindowImage = null;
         disposeWarmers();

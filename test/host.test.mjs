@@ -223,6 +223,122 @@ console.log("== delete ==");
   check("gc kept exactly that one reference", report?.kept === 1, JSON.stringify(report));
 }
 
+console.log("== ai accent: providers ==");
+{
+  const r = await call("GET", "/dsh-image-skin/providers");
+  const body = json(r);
+  check("GET /providers -> 200", r.status === 200, `got ${r.status}`);
+  check("eight presets offered", body?.providers?.length === 8, JSON.stringify(body?.providers?.length));
+  check("four AI strengths advertised (level 0 is local palette)", body?.strengths === 4, String(body?.strengths));
+  const ark = body?.providers?.find((p) => p.id === "ark-seedream");
+  check("ark preset carries its env var name", ark?.keyEnv === "ARK_API_KEY", JSON.stringify(ark));
+  check("envReady is false while the env var is unset", ark?.envReady === false, JSON.stringify(ark?.envReady));
+  check("custom preset ships without a url/model", body?.providers?.find((p) => p.id === "custom")?.baseUrl === "", r.body);
+}
+
+console.log("== ai accent: prompt ==");
+{
+  const r = await call(
+    "POST",
+    "/dsh-image-skin/prompt",
+    JSON.stringify({ style: "rococo", palette: ["17, 34, 51", "170, 187, 204"], strength: 3 }),
+  );
+  const p = json(r)?.prompt ?? "";
+  check("POST /prompt -> 200", r.status === 200, `got ${r.status}`);
+  check("prompt carries the palette rgb triplets", p.includes("17, 34, 51") && p.includes("170, 187, 204"), p.slice(0, 140));
+  check("prompt forbids text and figures", /no text/.test(p) && /no animals/.test(p), p.slice(-180));
+  check("prompt mentions the requested style", /rococo/i.test(p), p.slice(-180));
+}
+
+console.log("== ai accent: gen ==");
+// The generation route reaches the outside world only through global fetch, so a scripted
+// fetch is enough to drive every branch — no key, no network.
+const realFetch = globalThis.fetch;
+function mockFetch(handler) {
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return handler(String(url), init, calls.length);
+  };
+  return calls;
+}
+const jsonResponse = (payload, status = 200) =>
+  new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
+const okGen = { providerId: "custom", baseUrl: "http://127.0.0.1:9/v1", model: "m", apiKey: "k", prompt: "border" };
+{
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ providerId: "nope", prompt: "x" }));
+  check("unknown provider -> 400", r.status === 400, `got ${r.status} ${r.body}`);
+}
+{
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ providerId: "custom", prompt: "x" }));
+  check("custom without url/model -> 400", r.status === 400, `got ${r.status} ${r.body}`);
+  const r2 = await call(
+    "POST",
+    "/dsh-image-skin/gen",
+    JSON.stringify({ providerId: "custom", baseUrl: "http://127.0.0.1:9/v1", model: "m", prompt: "x" }),
+  );
+  check("custom without any key -> 400 naming the gap", r2.status === 400 && /API Key/.test(json(r2)?.error ?? ""), r2.body);
+}
+{
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ providerId: "ark-seedream", prompt: "x" }));
+  check("preset without an env key -> 400 naming ARK_API_KEY", r.status === 400 && /ARK_API_KEY/.test(json(r)?.error ?? ""), r.body);
+}
+{
+  // Happy path with a provider that answers with a data URI: nothing else gets fetched.
+  const calls = mockFetch(async () => jsonResponse({ data: [{ b64_json: PNG }] }));
+  const before = listFiles().length;
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ ...okGen, count: 99, size: "512x512" }));
+  const body = json(r);
+  check("gen -> 200 with a stored url", r.status === 200 && body?.urls?.length === 1, r.body);
+  check("stored url is a served file", /^\/dsh-image-skin\/files\/[0-9a-f-]+\.png$/.test(body?.urls?.[0] ?? ""), String(body?.urls?.[0]));
+  check("generated file landed on disk", listFiles().length === before + 1, JSON.stringify(listFiles()));
+  check("a manual key is reported as coming from settings", body?.keyFrom === "settings", JSON.stringify(body));
+  const sent = JSON.parse(calls[0]?.init?.body ?? "{}");
+  check("count is clamped to four", sent.n === 4, JSON.stringify(sent));
+  check("size is forwarded", sent.size === "512x512", JSON.stringify(sent));
+  check("key travels in the Authorization header", calls[0]?.init?.headers?.authorization === "Bearer k", JSON.stringify(calls[0]?.init?.headers));
+  check("openai-shaped body keeps response_format url", sent.response_format === "url", JSON.stringify(sent));
+  globalThis.fetch = realFetch;
+}
+{
+  // Ark: key from the environment, a remote image url in the reply, which must then be downloaded.
+  process.env.ARK_API_KEY = "env-key";
+  const calls = mockFetch(async (url) => {
+    if (url.includes("/images/generations")) return jsonResponse({ data: [{ url: "http://127.0.0.1:9/ornament.png" }] });
+    return new Response(Buffer.from(PNG, "base64"), { status: 200, headers: { "content-type": "image/png" } });
+  });
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify({ providerId: "ark-seedream", prompt: "frame" }));
+  const body = json(r);
+  check("an env-provided key is preferred over a typed one", r.status === 200 && body?.keyFrom === "env", r.body);
+  const sent = JSON.parse(calls[0]?.init?.body ?? "{}");
+  check("ark payload asks for a url and no watermark", sent.response_format === "url" && sent.watermark === false, JSON.stringify(sent));
+  check("ark model comes from the preset", sent.model === "doubao-seedream-4-0-250828", JSON.stringify(sent));
+  check("a remote reply is downloaded and stored", /\/files\/[0-9a-f-]+\.png$/.test(body?.urls?.[0] ?? ""), String(body?.urls?.[0]));
+  delete process.env.ARK_API_KEY;
+  globalThis.fetch = realFetch;
+}
+{
+  mockFetch(async () => jsonResponse({ data: [] }));
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify(okGen));
+  check("a reply without images -> 502", r.status === 502, `${r.status} ${r.body}`);
+  globalThis.fetch = realFetch;
+}
+{
+  mockFetch(async () => new Response("denied", { status: 401 }));
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify(okGen));
+  check("provider error -> 502 quoting the status", r.status === 502 && /401/.test(json(r)?.error ?? ""), r.body);
+  globalThis.fetch = realFetch;
+}
+{
+  mockFetch(async () => {
+    throw new Error("ECONNREFUSED");
+  });
+  const r = await call("POST", "/dsh-image-skin/gen", JSON.stringify(okGen));
+  check("unreachable provider -> 502 with the reason", r.status === 502 && /ECONNREFUSED/.test(json(r)?.error ?? ""), r.body);
+  globalThis.fetch = realFetch;
+}
+check("global fetch is restored", globalThis.fetch === realFetch);
+
 console.log("== disposer ==");
 check("effect kept the route disposer", typeof capturedDisposer === "function");
 capturedDisposer?.();
