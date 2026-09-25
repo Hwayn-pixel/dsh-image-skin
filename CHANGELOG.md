@@ -3,6 +3,54 @@
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
 > Each version starts with a Chinese summary, followed by the detailed English entries.
 
+## 0.4.0 — 2026-09-25
+
+**中文摘要** — 装饰纹样 + AI 纹样：①插件现在能给界面“骨架”（按钮 / 输入框 / 弹窗 / 它们背后的轨）染色，颜色从
+你的壁纸里提取——**档位 0** 完全本机计算、不联网；②**档位 1–4** 接任意 OpenAI 兼容的生图接口，让模型画一张真正的
+装饰边框（角花 + 连续边饰，提示词里锁死“不要文字/人/景/物”），生成后放进图墙，点一下就当装饰框用；Key 支持
+“环境变量（只读）”或“手动填”，只存本机；③内置 8 个服务商预设（火山方舟 Seedream / 通义万相 / 智谱 / 混元 /
+OpenAI / FLUX / Stability / 自定义），设置页里能检测环境变量有没有 key；④新增 `tools/demo-provider.mjs`
+（`npm run demo:provider`）——本机假生图服务，**没 key 也能把“生成→图墙→应用”整条链路跑通**；
+⑤离线测试从 32 条扩到 68 条，覆盖 AI 通路的成功与失败分支；⑥修掉欢迎页 `_card` 写死白底导致透明度滑块无效、
+以及 `apply()` 被调两次时旧实例会把新实例的 DOM 拆掉两个真 bug。
+
+> 裓位设计上把“纹样”交给模型、而不是用 CSS 硬画：CSS 渐变做出来的边框视觉上像虚线 / 禁用态，不像装饰。
+
+An accent pass over the interface skeleton, plus AI-generated ornament borders.
+
+### Added
+- **Accent (level 0, local).** A palette is extracted from whatever artwork is on the window and
+  painted onto the skeleton — buttons, inputs, dialogs, rails. Extraction weights colours by
+  **saturation × mid-lightness** rather than raw pixel count, so a night sky does not turn the whole
+  UI grey. Offline, no key.
+- **AI ornament (levels 1–4).** A real ornamental frame — corner flourishes, a repeating edge — from
+  any OpenAI-compatible text-to-image API, used as the border. The prompt is composed on the host
+  and hard-locks `no text / no letters / no people / no animals / no scenery / no objects / no
+  watermark`, so the model returns decoration only.
+- **Provider presets** (`GET /dsh-image-skin/providers`): 火山方舟 Seedream (Doubao), 通义万相,
+  智谱 CogView, 腾讯混元, OpenAI, FLUX, Stability, and a generic `自定义（OpenAI 兼容）`. The response
+  reports `envReady`, so the settings page can say whether an environment key is present. Keys come
+  from an environment variable (read-only in the UI) or a field you type; either way they stay local.
+- **`POST /dsh-image-skin/prompt`** — compose and preview the exact prompt without generating.
+- **`POST /dsh-image-skin/gen`** — generate, download the result and store it next to your other
+  images; the settings page turns the replies into a click-to-apply wall.
+- **`tools/demo-provider.mjs`** + `npm run demo:provider` — a dependency-free stand-in image API
+  that draws an ornament locally from the prompt’s palette, so the whole chain can be exercised
+  with no key and no network.
+
+### Fixed
+- **The welcome-page card ignored the theme.** `_card` used a hard-coded white background instead of
+  the theme token, so it stayed opaque no matter what panel opacity you chose.
+- **Re-applying the plugin could tear down the instance it had just built.** `apply()` called twice
+  (settings re-registering on a re-render) let the previous instance’s cleanup remove the new one’s
+  DOM; a generation guard now keeps the two apart.
+
+### Tests
+- The offline host suite grew from 32 to 68 assertions: `GET /providers`, `POST /prompt` and
+  `POST /gen` are driven through a scripted `fetch`, covering the happy path (data URI and remote
+  URL, clamped count, forwarded size, key precedence) and the failure paths (unknown provider,
+  custom without URL/model, no key anywhere, a reply with no images, 401, unreachable host).
+
 ## 0.3.0 — 2026-09-24
 
 **中文摘要** — 设置页重做 + 切换更顺：①取消「先选模式、再跳进另一个页面」的两级结构，改成**一屏到底**：顶部分段控件只当「正在编辑哪一套图」的过滤器，界面区域 / 角标 / 全局效果 / 存储全部常驻；②补上原本缺失的「**上传共用图**」入口（以前只能清、不能设）；③每个区域一行卡片：缩略图 + 名称 + **来源标签**（浅色专用 / 两模式共用 / 未设置）+ 操作；④修掉大页面上切浅/深色时的卡顿——不再让浏览器过渡 `color`（容器里几千个继承 `currentColor` 的图标会跟着全量重绘），大 DOM 下只过渡背景与描边。

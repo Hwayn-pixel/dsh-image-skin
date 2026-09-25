@@ -1,6 +1,7 @@
 node_modules/
 *.log
 .tmp-verify/
+.readme-preview.html
 
 # npm auth (never commit)
 .npmrc
