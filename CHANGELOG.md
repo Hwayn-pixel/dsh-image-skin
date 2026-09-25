@@ -68,6 +68,13 @@ An accent pass over the interface skeleton, plus AI-generated ornament borders.
   with no key and no network.
 
 ### Fixed
+- **The generated ornament could never appear.** `applyAccent` clamped the level to 2 before handing
+  it to the stylesheet, so the `level >= 3` branch inside `accentCss` — the only path that uses the
+  chosen generated frame — was unreachable. Levels 3-4 always fell back to the local art, which made
+  the headline feature quietly dead. The raw level now goes through, and the body attribute carries
+  it too (it is only a selector flag, but it is also the first thing you check when debugging).
+- **An applied ornament could not be taken off again.** There was no way back from "应用": clicking
+  the wall now toggles, so the applied thumbnail un-applies (the title says so).
 - **The settings screen was the least readable screen in the product.** The panel-opacity slider
   re-points DSH's own background tokens — which is exactly the point out in the app, but it turned our
   own cards into frosted glass over the wallpaper. Our surfaces now read one opaque colour of the

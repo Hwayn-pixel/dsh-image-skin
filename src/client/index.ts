@@ -1090,8 +1090,10 @@ function accentCss(palette: string[], level: number, mode: Mode, chosenFrame: st
       ? `url("${chosenFrame}")`
       : frameDataUri(`rgba(${ink}, .92)`, `rgba(${line}, .85)`, level >= 3 ? "rich" : level >= 2 ? "bracket" : "tick");
   // The frame is a fixed number of pixels per side, so a panel needs more of them than it looks:
-  // a 9px frame on an 800px dialog scales its corner motif down to two pixels and vanishes.
-  const width = chosenFrame && level >= 3 ? (level >= 4 ? 24 : 18) : level >= 2 ? 12 : 8;
+  // a 9px frame on an 800px dialog scales its corner motif down to two pixels and vanishes. The
+  // generated art is heavier per pixel, so it gets less width - at 18px it started covering the
+  // dialog's own title row.
+  const width = chosenFrame && level >= 3 ? (level >= 4 ? 20 : 14) : level >= 2 ? 12 : 8;
   const slice = chosenFrame && level >= 3 ? 30 : 22;
   lines.push(
     `${panel} {`,
@@ -1115,9 +1117,11 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit): Promi
     : 0;
   const wallpaper = resolveAreaImage(value, "window", mode);
 
-  // Levels 0-2 are drawn here; 3-4 hand the border over to a generated ornament (picked in the
-  // AI panel), so the generated CSS never has to reach past the richest local level.
-  const effective = Math.min(2, level);
+  // The raw level goes to the stylesheet: 0-2 choose the local weight, and 3-4 use the generated
+  // frame. Capping it here first (as this used to) made the generated ornament unreachable - the
+  // `level >= 3` branch inside accentCss could never be true. The body attribute is only a CSS
+  // selector flag, so it carries the real level too, which is also nicer to debug.
+  const effective = level;
 
   if (!wallpaper || value.accentEnabled === false) {
     document.body.removeAttribute(ACCENT_ATTR);
@@ -2245,8 +2249,10 @@ function AiAccentPanel(props: {
                 type: "button",
                 className: "dshImgSkin-result",
                 "data-on": String(String(v.accentFrame ?? "") === url),
-                title: "点击应用这张",
-                onClick: () => props.onSet("accentFrame", url),
+                // Clicking the applied one takes it off again: there was no way back from an
+                // applied frame before, and "点一下应用" reads as a toggle in every other picker.
+                title: String(v.accentFrame ?? "") === url ? "再点一下取消应用" : "点击应用这张",
+                onClick: () => props.onSet("accentFrame", String(v.accentFrame ?? "") === url ? "" : url),
               },
               h("img", { src: url, alt: "" }),
             ),
