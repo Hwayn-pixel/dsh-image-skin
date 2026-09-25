@@ -6,3 +6,8 @@ node_modules/
 # npm auth (never commit)
 .npmrc
 
+
+# editor backups
+*.bak
+*.bak_*
+
