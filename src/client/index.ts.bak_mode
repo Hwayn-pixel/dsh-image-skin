@@ -719,10 +719,10 @@ interface AccentLevelDef {
  */
 const ACCENT_LEVELS: AccentLevelDef[] = [
   { name: "取色", desc: "只把按钮与面板染上壁纸的色调（本机计算，不联网）", ready: true },
-  { name: "淡", desc: "底色很淡，只把壁纸的颜色接一点到控件上", ready: true },
-  { name: "标准", desc: "底色更明显，并带上画面的光（方向 + 冷暖）", ready: true },
-  { name: "浓", desc: "颜色最足，面板与弹窗都稳稳接住壁纸的调子", ready: true },
-  { name: "呼吸", desc: "和最浓一档同色；视频壁纸会跟着片子慢慢漂（不联网）", ready: true },
+  { name: "轻纹样", desc: "本机画：面板四角一个小角饰，控件一圈细线", ready: true },
+  { name: "标准", desc: "本机画：完整细边框 + 角花 + 连续边饰", ready: true },
+  { name: "华丽", desc: "用生图模型画装饰框，套在面板与控件上", ready: true },
+  { name: "极致", desc: "生图装饰框更粗、角饰更繁复", ready: true },
 ];
 
 /** Elements that make up the "skeleton" and deserve the accent. */
@@ -1409,14 +1409,6 @@ function parseTriple(triple: string): { r: number; g: number; b: number } {
  *   4. the tint always stays low-alpha, so the artwork behind is still the wallpaper.
  */
 /** The knob a user gets for an applied frame: how thick, how strong, and where. */
-/**
- * How much colour the interface takes on.
- *   wash  - every surface carries the picture's tint (the original route)
- *   marks - surfaces stay neutral, the colour appears only where it means something
- *   duo   - surface leans on the dominant hue, the picture's second hue is the signal colour
- */
-type ColourStyle = "wash" | "marks" | "duo";
-
 interface FrameOptions {
   scale: number;
   opacity: number;
@@ -1430,7 +1422,6 @@ function accentCss(
   chosenFrame: string,
   reading?: ArtworkReading | null,
   frame: FrameOptions = { scale: 1, opacity: 1, controls: false },
-  colourStyle: ColourStyle = "wash",
 ): string {
   const scheme = deriveScheme(palette, mode, reading?.light);
   const root = `body[${BODY_ATTR}][${ACCENT_ATTR}]`;
@@ -1438,18 +1429,6 @@ function accentCss(
   const panel = `${root} [${ACCENT_MARK}="panel"]`;
   const both = `${small}, ${panel}`;
   const { line, ink, wash, lightTint, spark, edge } = scheme;
-  // 只染三处: with the surface neutral, the glass itself carries the picture's colour and we only
-  // mark what is interactive - which is also what stops the UI looking like every wallpaper theme.
-  const neutralWash = mode === "dark" ? "10,14,22" : "255,255,255";
-  const neutralInk = mode === "dark" ? "236,243,255" : "20,26,38";
-  const surface = colourStyle === "marks" ? neutralWash : wash;
-  const signal = colourStyle === "duo" ? edge : spark;
-  // A thin wash of light in every mode - this is 借光, not a colour stain, so even the neutral mode
-  // keeps it. Card: only the marks mode leans on it on its own.
-  const surfaceGradient = (toDark: string, levelTint: number): string =>
-    colourStyle === "marks"
-      ? `linear-gradient(to ${toDark}, rgba(${lightTint}, ${(0.10 + levelTint).toFixed(3)}), rgba(0,0,0,0))`
-      : `linear-gradient(to ${toDark}, rgba(${lightTint}, ${(0.14 + levelTint).toFixed(3)}), rgba(${wash}, ${(levelTint * 0.35).toFixed(3)}), rgba(${wash}, 0.02))`;
   const lines: string[] = [];
 
   // Shared base: a low-alpha tint plus one hairline. This is the whole of level 0.
@@ -1473,8 +1452,8 @@ function accentCss(
   const litEdge = fromTop ? "inset 0 1px 0" : "inset 0 -1px 0";
   lines.push(
     `${both} {`,
-    `  background-color: rgba(${surface}, ${tint}) !important;`,
-    `  background-image: ${surfaceGradient(toDark, tint)} !important;`,
+    `  background-color: rgba(${wash}, ${tint}) !important;`,
+    `  background-image: linear-gradient(to ${toDark}, rgba(${lightTint}, ${(0.14 + tint).toFixed(3)}), rgba(${wash}, ${(tint * 0.35).toFixed(3)}), rgba(${wash}, 0.02)) !important;`,
     `  box-shadow: ${litEdge} rgba(${lightTint}, .32) !important;`,
     // 呼吸 (breathing): recolours arrive slowly from the breathing pass; let the paint catch up
     // instead of snapping.
@@ -1495,11 +1474,11 @@ function accentCss(
   // 火花 (the spark): the picture's most vivid colour is reserved for "you can touch this" -
   // hover, focus, pressed and selected. Used nowhere else, so it stays meaningful.
   lines.push(
-    `${root} [${ACCENT_MARK}]:hover { outline-color: rgba(${signal}, .8) !important; border-color: rgba(${signal}, .7) !important; }`,
-    `${root} [${ACCENT_MARK}]:focus-visible { outline-color: rgba(${signal}, .85) !important; }`,
+    `${root} [${ACCENT_MARK}]:hover { outline-color: rgba(${spark}, .8) !important; border-color: rgba(${spark}, .7) !important; }`,
+    `${root} [${ACCENT_MARK}]:focus-visible { outline-color: rgba(${spark}, .85) !important; }`,
     `${root} [${ACCENT_MARK}][aria-pressed="true"], ${root} [${ACCENT_MARK}][aria-selected="true"], ${root} [${ACCENT_MARK}][data-on="true"], ${root} [${ACCENT_MARK}][data-active="true"] {`,
-    `  outline-color: rgba(${signal}, .85) !important;`,
-    `  border-color: rgba(${signal}, .8) !important;`,
+    `  outline-color: rgba(${spark}, .85) !important;`,
+    `  border-color: rgba(${spark}, .8) !important;`,
     `}`,
   );
 
@@ -1519,28 +1498,15 @@ function accentCss(
     `  transform: translateY(0);`,
     `}`,
   );
-  if (colourStyle !== "marks") lines.push(hairline(`${small}:not([data-dsh-skin-busy="1"])`));
-  else
-    lines.push(
-      `${small}:focus-visible:not([data-dsh-skin-busy="1"]) {`,
-      `  outline: 1px solid rgba(${ink}, .55) !important;`,
-      `  outline-offset: -1px !important;`,
-      `}`,
-    );
+  lines.push(hairline(`${small}:not([data-dsh-skin-busy="1"])`));
 
-  // One quiet line per panel: in marks mode it is a neutral one, so the only colour on screen is
-  // something you can act on.
-  const panelLine =
-    colourStyle === "marks"
-      ? hairline(`${panel}:not([data-dsh-skin-busy="1"])`).replace(`rgba(${line}, `, `rgba(${neutralInk}, `).replace(`, ${alpha})`, ", .16)")
-      : hairline(`${panel}:not([data-dsh-skin-busy="1"])`);
   if (level === 0) {
-    lines.push(panelLine);
+    lines.push(hairline(`${panel}:not([data-dsh-skin-busy="1"])`));
     return lines.join("\n");
   }
   // 纹饰已下线：面板不再套任何花框、控件也不再戴角饰，这一档只调颜色。
   // (The ornament builders below are kept for when this path comes back; nothing calls them.)
-  lines.push(panelLine);
+  lines.push(hairline(`${panel}:not([data-dsh-skin-busy="1"])`));
   return lines.join("\n");
 
 }
@@ -1666,8 +1632,7 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
       ? await fadeImage(await keyOutBackground(frameUrl), frameOpts.opacity)
       : await keyOutBackground(frameUrl)
     : frameUrl;
-  const colourStyle = (String(value.accentMode ?? "wash") as ColourStyle) || "wash";
-  style.textContent = accentCss(palette, effective, mode, artUrl, reading, frameOpts, colourStyle);
+  style.textContent = accentCss(palette, effective, mode, artUrl, reading, frameOpts);
 }
 
 function disposeAccent(): void {
@@ -3238,12 +3203,6 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       .map((s) => s.trim())
       .filter(Boolean);
     /** Friendly names for the material read (see MATERIALS in the host half). */
-    /** One line per colour route, so the switch explains itself. */
-    const COLOUR_STYLES: Record<string, string> = {
-      wash: "每个面都带色，描边到处都有 —— 像被泡在颜色里",
-      marks: "面保持中性，只有选中项 / 焦点框 / 一条分隔线有色",
-      duo: "面借主色，交互色用画面里的第二个色相",
-    };
     const MATERIAL_LABELS: Record<string, string> = {
       sky: "天空 / 天光",
       paper: "纸 / 和纸",
@@ -3510,7 +3469,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       h(
         "p",
         { className: "dshImgSkin-intro" },
-        "档位只决定颜色染多深：0 最淡（只描一圈细线），往上逐级加深、并跟着画面里的光走。全部在本机完成，不联网。",
+        "档位 0 只在本机按壁纸配色给按钮 / 弹窗上色，不联网；档位 1–4 让生图模型画一张装饰边框，生成后在下面挑一张应用。",
       ),
       h(
         "div",
@@ -3522,42 +3481,6 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           onChange: (n: number) => apply("accentLevel", n),
           onToggle: (on: boolean) => apply("accentEnabled", on),
         }),
-        // 配色强度：三条路线的开关，差别一眼就能看出来（原型图见 _proto/routes_*.png）
-        h(
-          "div",
-          { className: "dshImgSkin-row" },
-          h(
-            "div",
-            { className: "dshImgSkin-head" },
-            h(
-              "div",
-              null,
-              h("span", { className: "dshImgSkin-title" }, "配色强度"),
-              h("small", { className: "dshImgSkin-hint" }, COLOUR_STYLES[String(v.accentMode ?? "wash")] ?? ""),
-            ),
-          ),
-          h(
-            "div",
-            { className: "dshImgSkin-inline" },
-            ...([
-              ["wash", "整屏染色"],
-              ["marks", "只染三处"],
-              ["duo", "双声部"],
-            ] as const).map(([id, label]) =>
-              h(
-                "button",
-                {
-                  key: id,
-                  type: "button",
-                  className: "dshImgSkin-btn",
-                  "data-active": String(v.accentMode ?? "wash") === id,
-                  onClick: () => apply("accentMode", id),
-                },
-                label,
-              ),
-            ),
-          ),
-        ),
         // Show what the scheme is built from. The sampler returns wallpaper colours; the CSS turns
         // them into one hue with three roles, so showing the raw four is an honest preview of the
         // material without pretending it is the result.
@@ -3576,7 +3499,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
                   ? h("span", { className: "dshImgSkin-fitlabel" }, `· 读到的材质：${MATERIAL_LABELS[String(v.accentMaterial)] ?? String(v.accentMaterial)}`)
                   : null,
               ),
-              h("span", { className: "dshImgSkin-hint" }, "档位只决定颜色染多深；配色全部在本机算，不联网"),
+              h("span", { className: "dshImgSkin-hint" }, "档位只决定本机画多少；生成的花纹在下面单独应用"),
             )
           : null,
       ),
