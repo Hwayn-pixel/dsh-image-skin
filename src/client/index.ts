@@ -764,6 +764,57 @@ interface ArtworkReading {
 const artworkCache = new Map<string, ArtworkReading>();
 /** Faded copies of a generated frame, keyed by url + alpha. */
 const fadeCache = new Map<string, string>();
+/** Generated frames with their flat background knocked out, keyed by url. */
+const knockoutCache = new Map<string, string>();
+
+/**
+ * Make a generated frame usable as an ornament.
+ *
+ * Image models draw on a background - usually white - and border-image would carry that band onto
+ * the panel, so the ornament arrives as "a white border with some pattern on it". Sample the colour
+ * at the centre (the frame's own middle is empty by design) and make everything close to it
+ * transparent. If almost nothing matches, the picture is not a frame on a flat background and is
+ * left alone rather than eaten.
+ */
+async function keyOutBackground(url: string): Promise<string> {
+  const cached = knockoutCache.get(url);
+  if (cached) return cached;
+  try {
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.src = url;
+    await img.decode();
+    const w = img.naturalWidth || 0;
+    const h = img.naturalHeight || 0;
+    if (!w || !h) return url;
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return url;
+    ctx.drawImage(img, 0, 0);
+    const data = ctx.getImageData(0, 0, w, h);
+    const px = data.data;
+    const mid = (Math.floor(h / 2) * w + Math.floor(w / 2)) * 4;
+    const bg = [px[mid], px[mid + 1], px[mid + 2]];
+    let cleared = 0;
+    for (let i = 0; i < px.length; i += 4) {
+      const distance =
+        Math.abs(px[i] - bg[0]) + Math.abs(px[i + 1] - bg[1]) + Math.abs(px[i + 2] - bg[2]);
+      if (distance < 46) {
+        px[i + 3] = 0;
+        cleared++;
+      }
+    }
+    if (cleared / (px.length / 4) < 0.06) return url;
+    ctx.putImageData(data, 0, 0);
+    const out = canvas.toDataURL("image/png");
+    knockoutCache.set(url, out);
+    return out;
+  } catch {
+    return url;                                    // cross-origin or undecodable: keep as-is
+  }
+}
 
 /**
  * Read the artwork once and keep the result. A video backdrop is re-read on demand (see the
@@ -1386,9 +1437,16 @@ function accentCss(
   // a 9px frame on an 800px dialog scales its corner motif down to two pixels and vanishes. The
   // generated art is heavier per pixel, so it gets less width - at 18px it started covering the
   // dialog's own title row. `frame.scale` lets the user trim it to the panel at hand.
-  const baseWidth = usingArt ? 14 : level >= 4 ? 22 : level >= 3 ? 18 : level >= 2 ? 12 : 8;
+  // Painted width, in pixels. A generated frame is a 1024px picture whose ornament is a couple of
+  // hundred pixels thick: painting that in 14px turns it into a smear, which is why an applied frame
+  // looked like a thin line. The local art is drawn for exactly this size, so it stays small. The
+  // 粗细 knob scales either one.
+  const baseWidth = usingArt ? 48 : level >= 4 ? 22 : level >= 3 ? 18 : level >= 2 ? 12 : 8;
   const width = Math.max(3, Math.round(baseWidth * frame.scale));
-  const slice = usingArt ? 30 : 26;
+  // Slices are percentages, not pixels: a generated frame arrives at 1024px, where `slice: 30`
+  // would mean the outermost 3% (a thin smeared line) instead of the corner artwork. 26-27% matches
+  // the local art's 26px corner in a 96px source, so both kinds scale the same way.
+  const slice = usingArt ? "26%" : "27%";
   // `stretch` smears an edge motif into a straight line - the local art is built to tile, so it asks
   // for `round`; a generated frame is one whole frame image, which is meant to be stretched.
   const repeat = usingArt ? "stretch" : "round";
@@ -1409,7 +1467,7 @@ function accentCss(
       `${small} {`,
       `  border: 1px solid transparent !important;`,
       `  border-image-source: ${controlArt} !important;`,
-      `  border-image-slice: ${usingArt ? slice : 14} !important;`,
+      `  border-image-slice: ${usingArt ? slice : "27%"} !important;`,
       `  border-image-width: ${Math.max(2, Math.round((usingArt ? 6 : 5) * frame.scale))}px !important;`,
       `  border-image-outset: 1px !important;`,
       `  border-image-repeat: ${repeat} !important;`,
@@ -1526,8 +1584,14 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
     opacity: Math.min(1, Math.max(0.3, Number(value.accentFrameOpacity ?? 1) || 1)),
     controls: value.accentFrameControls === true,
   };
-  // "透明度" on a bitmap frame means fading its alpha, not washing out the panel behind it.
-  const artUrl = frameUrl && frameOpts.opacity < 1 ? await fadeImage(frameUrl, frameOpts.opacity) : frameUrl;
+  // A generated frame gets its flat background knocked out first, or the panel wears a band of
+  // whatever colour the model painted behind the ornament (usually white). Fading only happens when
+  // the opacity knob asks for it, so an opaque frame is not needlessly re-encoded.
+  const artUrl = frameUrl
+    ? frameOpts.opacity < 1
+      ? await fadeImage(await keyOutBackground(frameUrl), frameOpts.opacity)
+      : await keyOutBackground(frameUrl)
+    : frameUrl;
   style.textContent = accentCss(palette, effective, mode, artUrl, reading, frameOpts);
 }
 
@@ -2692,7 +2756,33 @@ function AiAccentPanel(props: {
       isCustom ? "自定义：下面填 Base URL 与模型 ID" : `默认模型 ${String(current?.model ?? "")}`,
     ),
     keyCheck ? h("p", { className: "dshImgSkin-ok" }, keyCheck) : null,
-    isCustom ? field("base", "Base URL", textInput("accentBaseUrl", { placeholder: "https://your-endpoint/v1" })) : null,
+    // The address override is shown whenever one is set, not only for 自定义 - otherwise a leftover
+    // testing URL stays invisible while the provider is switched back to a preset, and every request
+    // quietly goes to the wrong host. (This is exactly how a local mock endpoint kept intercepting a
+    // real key.)
+    isCustom || String(v.accentBaseUrl ?? "").trim()
+      ? field(
+          "base",
+          "Base URL",
+          h(
+            "div",
+            { className: "dshImgSkin-inline" },
+            textInput("accentBaseUrl", {
+              placeholder: isCustom ? "https://your-endpoint/v1" : `留空则用官方地址 ${String(current?.baseUrl ?? "")}`,
+            }),
+            String(v.accentBaseUrl ?? "").trim()
+              ? h(
+                  "button",
+                  { className: "dshImgSkin-btn", type: "button", "data-variant": "quiet", onClick: () => props.onSet("accentBaseUrl", "") },
+                  "清空（用官方地址）",
+                )
+              : null,
+          ),
+          isCustom
+            ? "自定义服务商：Base URL 与模型 ID 都要填"
+            : "⚠️ 这里填过地址，它会覆盖该服务商的官方地址（测试用的本地地址就是这样把请求引走的）",
+        )
+      : null,
     field(
       "model",
       "模型 ID",

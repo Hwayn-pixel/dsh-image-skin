@@ -444,7 +444,8 @@ console.log("== ai accent: count means independent jobs ==");
   check("count=2 -> two submissions", submits.length === 2, String(submits.length));
   check("count=2 -> two stored images", r.status === 200 && body?.urls?.length === 2, `${r.status} ${r.body}`);
   const sent = JSON.parse(submits[0]?.init?.body ?? "{}");
-  check("count no longer rides on n", sent?.parameters?.n === undefined, JSON.stringify(sent));
+  // n must be explicit: 万相 returns four pictures when it is omitted, so "1 张" would bill for four.
+  check("count rides on separate jobs, with n pinned to 1", sent?.parameters?.n === 1, JSON.stringify(sent));
   globalThis.fetch = realFetch;
 }
 
