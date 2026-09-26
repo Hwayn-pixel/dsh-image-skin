@@ -3959,6 +3959,16 @@ export function apply(ctx: ClientContext): void {
         requestAnimationFrame(() => modeStore.notify());
         if (flipped) renderSkin(true);
         else render();
+        // `theme/change` *leads* the DOM: for a beat after it fires, the theme flag and the theme
+        // service can still report the old scheme, and the accent is derived from an async image
+        // read on top of that. Repainting only in that instant is how a light<->dark switch ends up
+        // still wearing the previous scheme until a manual reload. Repaint once more after both
+        // have settled.
+        if (flipped) {
+          window.setTimeout(() => {
+            if (generation === applyGeneration) renderSkin(true);
+          }, 700);
+        }
       }) as (() => void) | undefined;
       // 呼吸 (breathing): a video backdrop keeps moving, so re-read a frame now and then and let the
       // accent drift with it - slowly, and only within a small hue distance of the seed (see the
