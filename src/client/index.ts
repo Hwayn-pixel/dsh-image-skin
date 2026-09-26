@@ -121,7 +121,7 @@ function ensureBaseStyles(): void {
   style.textContent = [
     // ── shell ──────────────────────────────────────────────────────────────────
     ".dshImgSkin-shell{display:flex;flex-direction:column;gap:14px;padding:2px 0 20px}",
-    ".dshImgSkin-intro{font-size:12px;line-height:1.6;opacity:.62;margin:0}",
+    ".dshImgSkin-intro{font-size:12px;line-height:1.6;opacity:.72;margin:0}",
     ".dshImgSkin-banner{font-size:12px;line-height:1.5;border-radius:8px;padding:7px 11px;margin:0;",
     "background:color-mix(in srgb,var(--dsw-alias-state-error-primary,#d9534f) 12%,transparent);",
     "color:var(--dsw-alias-state-error-primary,#d9534f)}",
@@ -132,8 +132,8 @@ function ensureBaseStyles(): void {
     "background:var(--dsw-alias-bg-layer-1,transparent);padding:14px 16px;display:flex;flex-direction:column;gap:12px}",
     ".dshImgSkin-cardhead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}",
     ".dshImgSkin-title{font-weight:600;font-size:13.5px;letter-spacing:.2px}",
-    ".dshImgSkin-sub{font-size:11.5px;line-height:1.55;opacity:.58;margin:3px 0 0}",
-    ".dshImgSkin-hint{font-size:11.5px;line-height:1.55;opacity:.58;display:block;margin-top:3px}",
+    ".dshImgSkin-sub{font-size:11.5px;line-height:1.55;opacity:.68;margin:3px 0 0}",
+    ".dshImgSkin-hint{font-size:11.5px;line-height:1.55;opacity:.68;display:block;margin-top:3px}",
 
     // ── segmented control (mode filter) ───────────────────────────────────────
     ".dshImgSkin-seg{display:inline-flex;gap:2px;padding:3px;border-radius:11px;",
@@ -160,7 +160,7 @@ function ensureBaseStyles(): void {
     "border:1px dashed var(--dsw-alias-border-l2,rgba(128,128,128,.32));font-size:10.5px;opacity:.5}",
     ".dshImgSkin-met{display:flex;flex-direction:column;gap:2px;min-width:0}",
     ".dshImgSkin-name{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px}",
-    ".dshImgSkin-src{font-size:11px;opacity:.55;line-height:1.5}",
+    ".dshImgSkin-src{font-size:11px;opacity:.66;line-height:1.5}",
     ".dshImgSkin-tag{font-size:10px;font-weight:500;padding:1px 6px;border-radius:99px;letter-spacing:.2px;",
     "border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.3));opacity:.8}",
     ".dshImgSkin-tag[data-kind='mode']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);",
@@ -182,7 +182,7 @@ function ensureBaseStyles(): void {
     ".dshImgSkin-switch input{flex:0 0 auto}",
     ".dshImgSkin-slider{display:flex;flex-direction:column;gap:6px}",
     ".dshImgSkin-slider input[type=range]{width:100%;margin:0}",
-    ".dshImgSkin-sliderhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px}",
+    ".dshImgSkin-sliderhead{display:flex;justify-content:space-between;align-items:center;gap:12px}",
     ".dshImgSkin-value{font-size:12px;font-variant-numeric:tabular-nums;opacity:.75}",
     ".dshImgSkin-range{width:100%;margin:2px 0 0}",
     ".dshImgSkin-range:disabled{opacity:.45}",
@@ -207,8 +207,8 @@ function ensureBaseStyles(): void {
     ".dshImgSkin-entry:disabled{opacity:.5;cursor:not-allowed}",
     ".dshImgSkin-entryTop{display:flex;align-items:center;justify-content:space-between;gap:10px}",
     ".dshImgSkin-entryTitle{font-size:14px;font-weight:600}",
-    ".dshImgSkin-entryGo{font-size:11.5px;opacity:.6;white-space:nowrap}",
-    ".dshImgSkin-entrySub{font-size:11.5px;line-height:1.6;opacity:.6}",
+    ".dshImgSkin-entryGo{font-size:11.5px;opacity:.68;white-space:nowrap}",
+    ".dshImgSkin-entrySub{font-size:11.5px;line-height:1.6;opacity:.68}",
     ".dshImgSkin-lock{font-size:11px;line-height:1.5;opacity:.75;color:var(--dsw-alias-state-warn-primary,#c9881f)}",
 
     // ── the pre-flight notice ─────────────────────────────────────────────────
@@ -268,7 +268,7 @@ function ensureBaseStyles(): void {
     "box-shadow:0 0 0 2px var(--dsw-alias-brand-primary,#5aa7d8)}",
     ".dshImgSkin-result img{width:118px;height:74px;object-fit:cover;display:block}",
     ".dshImgSkin-fit{display:inline-flex;align-items:center;gap:5px}",
-    ".dshImgSkin-fitlabel{font-size:11.5px;opacity:.55}",
+    ".dshImgSkin-fitlabel{font-size:11.5px;opacity:.66}",
     "[data-dsh-skin-editing='true']{outline:2px dashed var(--dsw-alias-brand-primary,#5aa7d8);outline-offset:2px}",
 
     // Theme switch: for one short window the palette transitions instead of snapping.
@@ -531,6 +531,28 @@ function applyWindowColumns(image: string): void {
 const VIDEO_RE = /\.(mp4|webm)(\?.*)?$/i;
 const VIDEO_LAYER_ID = "dsh-image-skin-video";
 
+/**
+ * The layer's current frame as a data URL, or "" if it cannot be read yet.
+ *
+ * Used to hold the outgoing frame on screen across a `src` swap: a bare swap blanks the layer for
+ * as long as the incoming clip takes to decode (a local mp4 does *not* come up in one frame), and
+ * that blank frame is the flash a light<->dark switch shows - both modes here are videos.
+ */
+function captureFrame(v: HTMLVideoElement): string {
+  try {
+    if (!v.videoWidth || !v.videoHeight || v.readyState < 2) return "";
+    const c = document.createElement("canvas");
+    c.width = 480;
+    c.height = Math.max(1, Math.round(480 * (v.videoHeight / v.videoWidth)));
+    const ctx = c.getContext("2d");
+    if (!ctx) return "";
+    ctx.drawImage(v, 0, 0, c.width, c.height);
+    return c.toDataURL("image/jpeg", 0.72);
+  } catch {
+    return "";
+  }
+}
+
 /** Lazily create the full-screen looping <video> backdrop layer. */
 function videoLayer(): HTMLVideoElement {
   let v = document.getElementById(VIDEO_LAYER_ID) as HTMLVideoElement | null;
@@ -545,7 +567,7 @@ function videoLayer(): HTMLVideoElement {
     v.setAttribute("muted", "");
     v.setAttribute("aria-hidden", "true");
     v.style.cssText =
-      "position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none;background:#000;";
+      "position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:-1;pointer-events:none;background:transparent;";
     document.body.prepend(v);
   }
   return v;
@@ -578,6 +600,10 @@ function applyWindow(value: SkinValue, mode: Mode, fade = false): void {
   if (isVideo) {
     const v = videoLayer();
     if (v.getAttribute("src") !== image) {
+      // Freeze the frame that is on screen as the poster, so the swap shows the old picture until
+      // the new clip can render its first one - instead of a black hole in between.
+      const poster = captureFrame(v);
+      if (poster) v.poster = poster;
       v.src = image;
       void v.play?.().catch(() => {});
     }
@@ -761,7 +787,7 @@ const ACCENT_LEVELS: AccentLevelDef[] = [
   { name: "淡", desc: "底色很淡，只把壁纸的颜色接一点到控件上", ready: true },
   { name: "标准", desc: "底色更明显，并带上画面的光（方向 + 冷暖）", ready: true },
   { name: "浓", desc: "颜色最足，面板与弹窗都稳稳接住壁纸的调子", ready: true },
-  { name: "呼吸", desc: "和最浓一档同色；视频壁纸会跟着片子慢慢漂（不联网）", ready: true },
+  { name: "呼吸", desc: "和「浓」同色；视频壁纸会跟着画面慢慢漂", ready: true },
 ];
 
 /** Elements that make up the "skeleton" and deserve the accent. */
@@ -2556,7 +2582,7 @@ function AreaRow(props: {
   const effective = resolveAreaImage(v, area.id, props.mode);
   const sourceKind = specific ? "mode" : sharedImage ? "shared" : "none";
   const sourceLabel =
-    sourceKind === "mode" ? `${modeWord}专用` : sourceKind === "shared" ? "两模式共用" : "未设置";
+    sourceKind === "mode" ? `${modeWord}专用` : sourceKind === "shared" ? "两模式通用" : "未设置";
   const enabled = v[`${area.id}Enabled`] !== false;
   const fit = String(v[`${area.id}Fit`] ?? "cover");
   const isVideo = effective.length > 0 && VIDEO_RE.test(effective);
@@ -2626,7 +2652,7 @@ function AreaRow(props: {
       picker("up-mode", `上传${modeWord}图`, specificField, "primary"),
       // Only offered when there is no shared image yet - otherwise the 清除 button already
       // covers it, and two near-identical upload buttons side by side just add noise.
-      sharedImage ? null : picker("up-shared", "上传共用图", sharedField, "quiet"),
+      sharedImage ? null : picker("up-shared", "上传通用图", sharedField, "quiet"),
       effective
         ? h(
             "button",
@@ -2637,7 +2663,7 @@ function AreaRow(props: {
               "data-variant": "quiet",
               onClick: () => props.onClear(sourceKind === "shared" ? sharedField : specificField),
             },
-            sourceKind === "shared" ? "清除共用图" : "清除",
+            sourceKind === "shared" ? "清除通用图" : "清除",
           )
         : null,
       area.kind === "region"
@@ -2761,7 +2787,7 @@ function AccentRow(props: {
         h(
           "span",
           { className: "dshImgSkin-hint" },
-          "根据窗口壁纸的配色，给按钮、弹窗和设置分区加底纹。档位越高越复杂；前几档在本机算，不联网。",
+          "根据窗口壁纸的配色，给按钮、弹窗和设置分区加底纹。颜色染多深由档位决定。",
         ),
       ),
       h(
@@ -3282,7 +3308,7 @@ function AiAccentPanel(props: {
             },
             ["1024x1024", "1280x720", "720x1280"].map((s) => h("option", { key: s, value: s }, s)),
           ),
-          "边框是九宫格贴上去的，尺寸影响不大，默认就行",
+          "尺寸影响不大，用默认的就行",
         )
       : null,
 
@@ -3377,7 +3403,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
     // and keeps accepting clicks, but its token is dead - so writes fail and every control looks
     // broken ("点上去没反应"). Say so on screen instead of leaving a dead UI behind.
     const writeFailedNotice =
-      "写不进去：这个页面和 DSH 的连接已经断了（我重启过服务的话就会这样）。请刷新页面，或用最新打开的那个标签。";
+      "写不进去：这个页面和 DSH 的连接已经断了（DSH 服务重启过就会这样）。请刷新页面，或用最新打开的那个标签。";
     const apply = (field: string, value: unknown): void => {
       void scope.set(field, value).catch(() => setNotice(writeFailedNotice));
     };
@@ -3614,10 +3640,10 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           "ul",
           { className: "dshImgSkin-modalList" },
           h("li", null, "点「生成」时，提示词和壁纸配色会发给你选的第三方生图服务——这部分内容会离开本机。"),
-          h("li", null, "档位 1–4 会按你在那家服务的账号计费，张数和尺寸都影响花费。"),
+          h("li", null, "每生成一张，都会按你在那家服务的价格计费；张数和尺寸影响花费。"),
           h("li", null, "画成什么样由模型决定，不保证一次满意，可能要试几张才挑到合适的。"),
           h("li", null, "API Key 只存在本机（或读环境变量，界面里只读），不会发给除你选定服务之外的任何地方。"),
-          h("li", null, "档位 0「取色」完全在本机计算：不联网、不花钱、不需要 key。"),
+          h("li", null, "取色和配色完全在本机算：不联网、不花钱、不需要 key。"),
         ),
         h(
           "div",
@@ -3650,7 +3676,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       h(
         "p",
         { className: "dshImgSkin-intro" },
-        "分两步走：先在「贴图」里放上自己的画面，再决定要不要用「AI 纹样」给按钮和弹窗加装饰。图片只存在本机（$DSH_HOME/image-skin）。",
+        "分两步走：先在「贴图」里放上自己的画面，再决定要不要用「AI 纹样」给按钮和弹窗加装饰。图片只存在本机，不会上传。",
       ),
       h(
         "div",
@@ -3681,7 +3707,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       h(
         "p",
         { className: "dshImgSkin-intro" },
-        "给界面各区域换上你自己的图片或视频；图片只存在本机（$DSH_HOME/image-skin），不会上传到外部服务。",
+        "给界面各区域换上你自己的图片或视频；图片只存在本机，不会上传到外部服务。",
       ),
       configuredAreas === 0
         ? h(
@@ -3709,7 +3735,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
             h(
               "p",
               { className: "dshImgSkin-sub" },
-              "浅色和深色各有一套图；切换时界面主题也会跟着切，方便边配边看。某个区域没单独配，会回退到「共用图」。",
+              "浅色和深色各有一套图；切换时界面主题也会跟着切，方便边配边看。某个区域没单独配，会回退到「通用图」。",
             ),
           ),
           modeSeg,
@@ -3727,7 +3753,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
             "div",
             null,
             h("span", { className: "dshImgSkin-title" }, "全局效果"),
-            h("p", { className: "dshImgSkin-sub" }, "两个模式共用，拖动即时生效。"),
+            h("p", { className: "dshImgSkin-sub" }, "两个模式通用，拖动即时生效。"),
           ),
         ),
         h(SliderRow, {
@@ -3768,7 +3794,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
             h(
               "p",
               { className: "dshImgSkin-sub" },
-              `图片存在 $DSH_HOME/image-skin，单文件上限 ${MAX_UPLOAD_MB} MB；换图或清除后不再被引用的旧文件会自动删除`,
+              `图片存在本机的 image-skin 目录，单文件上限 ${MAX_UPLOAD_MB} MB；换图或清除后，不再被引用的旧文件会自动删掉——想留就先存一份`,
             ),
           ),
           h(
@@ -3867,33 +3893,15 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
                   h("span", { key: `s${i}`, className: "dshImgSkin-swatch", style: { background: `rgb(${c})` }, title: c }),
                 ),
                 String(v.accentMaterial ?? "") && String(v.accentMaterial) !== "plain"
-                  ? h("span", { className: "dshImgSkin-fitlabel" }, `· 读到的材质：${MATERIAL_LABELS[String(v.accentMaterial)] ?? String(v.accentMaterial)}`)
+                  ? h("span", { className: "dshImgSkin-fitlabel" }, `· 识别到的材质：${MATERIAL_LABELS[String(v.accentMaterial)] ?? String(v.accentMaterial)}`)
                   : null,
               ),
               h("span", { className: "dshImgSkin-hint" }, "档位只决定颜色染多深；配色全部在本机算，不联网"),
             )
           : null,
       ),
-      // 纹饰（AI 生成的花纹框）暂时下线，代码留在 git 里（e19c633 / 34c3002 / b66006e）。
-      // 它给整块面板套一圈重花纹，实测“看着吓人”，而这条路的价值也还没定下来；先只做配色。
-      h(
-        "div",
-        { className: "dshImgSkin-card" },
-        h(
-          "div",
-          { className: "dshImgSkin-cardhead" },
-          h(
-            "div",
-            null,
-            h("span", { className: "dshImgSkin-title" }, "纹饰 · 开发中（已下线）"),
-            h(
-              "p",
-              { className: "dshImgSkin-sub" },
-              "AI 生成花纹那条路先收起来——它把面板包成一圈重花纹，压得慌。这一页现在只做配色。",
-            ),
-          ),
-        ),
-      ),
+      // 纹饰（面板花框）那条路暂时留在 git 里（e19c633 / 34c3002 / b66006e），不再在这页挂一张
+      // "已下线"的空卡片了——实测它"看着吓人"，而这条路的价值还没定；这一页现在只做配色。
       riskOpen ? riskModal : null,
     );
 
