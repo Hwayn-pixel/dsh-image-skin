@@ -419,6 +419,12 @@ function scheduleWarmOtherMode(value: SkinValue, mode: Mode): void {
       if (VIDEO_RE.test(url)) warmVideo(url);
       else warmImage(url);
     }
+    // Read it, don't just fetch it. A flip re-derives the whole scheme from the other mode's
+    // artwork, so a cold sample is the stall that is felt when switching modes. Pre-reading keeps
+    // the other mode's palette / light / material in the sampler's cache, so both modes are built
+    // up-front and the switch itself has nothing left to compute.
+    const otherWallpaper = resolveAreaImage(value, "window", other);
+    if (otherWallpaper && otherWallpaper !== resolveAreaImage(value, "window", mode)) void sampleArtwork(otherWallpaper);
   }, 250);
 }
 
@@ -688,8 +694,13 @@ const ACCENT_MARK = "data-dsh-accent";
 const BUSY_ATTR = "data-dsh-skin-busy";
 /** The first hue we saw for the current wallpaper; the breathing pass stays near it. */
 let breathSeed: { url: string; hue: number | null } | null = null;
-/** The wallpaper the current paint was built from, so a switch can force a re-read. */
-let lastWallpaper: string | null = null;
+/**
+ * The wallpaper each mode was last painted from. Per mode, so a *wallpaper switch* can force a
+ * re-read while a light↔dark flip does not: the two modes use different artwork, and forcing a
+ * fresh sample on every flip made the whole scheme re-read from scratch at the exact moment the
+ * user was waiting for it. Tracking per mode lets a flip reuse the reading warmed for that mode.
+ */
+const lastWallpaper: Record<Mode, string | null> = { light: null, dark: null };
 
 /** The hue the scheme would pick for a palette ("best usable colour"), or null if there is none. */
 function seedHueOf(palette: string[]): number | null {
@@ -1840,8 +1851,8 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
   // A new wallpaper must be read *now*, not when the breathing timer next fires: switching the
   // picture is the one moment the scheme visibly has to change, and a cache hit for a re-uploaded
   // file would keep the old colours.
-  const wallpaperChanged = lastWallpaper !== wallpaper;
-  lastWallpaper = wallpaper;
+  const wallpaperChanged = lastWallpaper[mode] !== wallpaper;
+  lastWallpaper[mode] = wallpaper;
   const reading = await sampleArtwork(wallpaper, refresh || wallpaperChanged);
   const palette = reading?.palette ?? [];
   if (!palette.length) {
@@ -1936,6 +1947,8 @@ function disposeAccent(): void {
   });
   accentTargets = [];
   breathSeed = null;
+  lastWallpaper.light = null;
+  lastWallpaper.dark = null;
 }
 
 // ── regions ─────────────────────────────────────────────────────────────────
