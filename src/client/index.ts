@@ -1719,7 +1719,7 @@ function accentCss(
   const small = `${root} [${ACCENT_MARK}="small"]`;
   const panel = `${root} [${ACCENT_MARK}="panel"]`;
   const both = `${small}, ${panel}`;
-  const { line, ink, wash, lightTint, spark, edge, panelTone, raisedTone, raisedHi, raisedDown, accent, accentInk } = scheme;
+  const { line, ink, wash, lightTint, spark, edge, panelTone, wellTone, raisedTone, raisedHi, raisedDown, accent, accentInk } = scheme;
   // 只染三处: with the surface neutral, the glass itself carries the picture's colour and we only
   // mark what is interactive - which is also what stops the UI looking like every wallpaper theme.
   const neutralWash = mode === "dark" ? "10,14,22" : "255,255,255";
@@ -1831,6 +1831,31 @@ function accentCss(
       `  outline-offset: -1px !important;`,
       `}`,
     );
+
+  // Some of DSH's own controls paint a colour that never came from a token: the selected preset
+  // card is a flat hard blue (`#2464db`), the "in use" chip is near-black (`#111`), and the little
+  // code box (`standard`, `ptc`) uses text and background that are almost the same. They read as
+  // "pasted on" - a different material from the glass around them. Re-point each at a role from our
+  // own scheme, keyed on the class *suffix* so it survives DSH rebuilds.
+  lines.push(
+    `${root} [class*="_cardMain"][aria-pressed="true"] {`,
+    `  background-color: rgba(${accent}, .82) !important;`,
+    `  border-color: rgba(${accent}, .95) !important;`,
+    `  color: rgb(${accentInk}) !important;`,
+    `}`,
+    `${root} [class*="_inUse"] {`,
+    `  background-color: rgba(${ink}, .88) !important;`,
+    `  color: rgb(${raisedHi}) !important;`,
+    `}`,
+    `${root} code[class*="_cardId"], ${root} [class*="_cardId"] {`,
+    `  background-color: rgba(${wellTone}, .72) !important;`,
+    `  color: rgb(${ink}) !important;`,
+    `}`,
+    `${root} [class*="_tag"] {`,
+    `  background-color: rgba(${wellTone}, .62) !important;`,
+    `  color: rgb(${ink}) !important;`,
+    `}`,
+  );
 
   // One quiet line per panel: in marks mode it is a neutral one, so the only colour on screen is
   // something you can act on.
