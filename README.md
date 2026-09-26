@@ -28,17 +28,18 @@ exactly where you want it**, and it does a few things the others do not:
   drag the corner to scale; positions persist.
 - **Panel translucency** — one slider makes DSH's own surfaces see-through so the wallpaper shows;
   the wallpaper itself is deliberately *not* dimmed by it.
-- **Accent & AI ornament** — the plugin can also paint the *skeleton* (buttons, inputs, dialogs,
-  the rail behind them) with colours pulled from your wallpaper, so the interface stops looking
-  grey. Level 0 does that locally, offline. Levels 1–2 add a hairline and a corner ornament drawn
-  on your machine; levels 3–4 ask a text-to-image model for a real ornamental frame — corner
-  flourishes and a repeating edge, no text, no figures — which is then used as a panel frame. Any
-  OpenAI-compatible image API will do, and Alibaba's Model Studio (通义万相 / 千问) is supported through
-  its own submit-and-poll protocol; the key stays on your machine. The sampled colours ride
-  along in the prompt, so the ornament comes back in your wallpaper's palette, and a video backdrop
-  is sampled from a real frame. The whole thing is built from a single hue: the sampler's four
-  colours are reduced to one, and each role (hairline, corner ink, surface tint) is derived from
-  it and contrast-checked, so the result harmonises instead of clashing.
+- **Colour that comes from your picture** — the plugin paints the *skeleton* (buttons, inputs,
+  dialogs, the rail behind them) with colours sampled from your wallpaper, so the interface stops
+  looking grey. All of it is local and offline, and a video backdrop is sampled from a real frame.
+  The whole scheme is built from a single hue — the sampler's colours are reduced to one, every role
+  (hairline / ink / surface) is derived from it, and each step is contrast-checked — so it harmonises
+  instead of clashing. The **depth slider** only decides how deeply the colour is laid on
+  (淡 / 标准 / 浓 / 呼吸), never what gets drawn.
+- **Optional AI ornament** — a separate switch asks a text-to-image model for a real ornamental
+  frame (corner flourishes and a repeating edge, no text, no figures) and wears it as a panel frame.
+  Any OpenAI-compatible image API will do, and Alibaba's Model Studio (通义万相 / 千问) is supported
+  through its own submit-and-poll protocol; the key stays on your machine, and the sampled colours
+  ride along in the prompt so the ornament comes back in your wallpaper's palette.
 - **Smooth, and it stays smooth** — the light/dark cross-fade animates only what a compositor can
   animate, and on a heavy DOM it stops touching text colour, which is what makes other
   implementations stutter on a long conversation.
@@ -88,8 +89,9 @@ what leaves the machine, what costs money, and what stays local) — 不再显�
 - **全局效果 / Global** — panel opacity, video playback rate.
 - **存储 / Storage** — `清理未使用图片` collects stored files no area references any more.
 
-*AI 纹样 / AI ornament* — the accent level slider (0 = local palette, 1–4 = generation strength)
-plus the generator: provider, key, count, size, style, a prompt preview, and the wall of results.
+*AI 纹样 / AI ornament* — the colour-depth slider (0 = a single hairline … 4 = deepest), the three
+colour routes (wash / marks / duo), the sampled palette and material read, plus the generator:
+provider, key, count, size, style, a prompt preview, and the wall of results.
 
 | Control | Meaning |
 |---|---|
@@ -191,10 +193,12 @@ MIT — see [LICENSE](LICENSE).
 - **浅色深色分开配**：两套独立的图，切主题时连壁纸一起换；没单独配的模式会自动回退到"共用图"。
 - **角标**：侧栏和输入框上各贴一个，拖动移动、拖角缩放，位置会记住。
 - **面板不透明度**：一个滑块让 DSH 自己的面板变半透明、透出壁纸；**壁纸本身不会被调暗**。
-- **装饰纹样（Accent）**：除了壁纸，插件还能给界面的“骨架”（按钮、输入框、弹窗、它们背后的轨）染上从壁纸里
-  取出来的颜色，不让界面一直发灰。**档位 0** 是本机取色、不联网；**档位 1–4** 交给生图模型画一张真正的
-  装饰边框（角花 + 连续边饰，只要花纹、不要文字和人），再当作边框用。**任何 OpenAI 兼容的生图接口**都能接，
-  Key 只存本机。
+- **配色取自你的画面**：除了壁纸，插件还能给界面的“骨架”（按钮、输入框、弹窗、它们背后的轨）染上从壁纸里
+  取出来的颜色，不让界面一直发灰。**全部在本机算、不联网**，视频壁纸也会真采一帧。整套路数建立在**一个色相**上：
+  采样到的几种颜色收敛成一个，每个角色（描边 / 墨色 / 面色）从它派生、逐个校验对比度，所以是协调而不是打架。
+  **档位只决定颜色染多深**（淡 / 标准 / 浓 / 呼吸），不决定画什么。
+- **可选：AI 装饰框**：另有一个开关，让生图模型画一张真正的装饰边框（角花 + 连续边饰，只要花纹、不要文字和人），
+  再当作面板边框用。**任何 OpenAI 兼容的生图接口**都能接，Key 只存本机。
 - **顺滑，而且是持续的顺滑**：明暗交叉淡化只动合成器能动的属性；元素多的时候它干脆不碰文字颜色——这正是
   别家实现会在长对话里卡顿的原因。
 - **只存本机、可一键还原**：文件落在 `$DSH_HOME/image-skin/`，由本机自己提供；禁用插件后它加过的样式、
@@ -222,8 +226,8 @@ dsh plugin --profile web add dsh-image-skin
 - **全局效果**：面板不透明度、视频播放速率。
 - **存储**：「清理未使用图片」会回收不再被任何区域引用的文件。
 
-*AI 纹样* 页：装饰档位（0 = 本机取色，1–4 = 生成强度）+ 生图工作台（服务商 / Key / 张数 / 尺寸 / 风格 /
-提示词预览 / 结果图墙）。
+*AI 纹样* 页：颜色深浅档位（0 = 只描一圈细线 … 4 = 最浓）+ 三条配色路线（整屏染色 / 只染三处 / 双声部）+
+取色与材质的读数 + 生图工作台（服务商 / Key / 张数 / 尺寸 / 风格 / 提示词预览 / 结果图墙）。
 
 ### 结构
 
