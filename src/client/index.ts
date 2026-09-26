@@ -1446,14 +1446,14 @@ function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["lig
       const { r, g, b } = parseTriple(p);
       return { ...rgbToHsl(r, g, b) };
     })
-    // Rank by "usable as a UI colour": it has to be a colour at all, and it must not be so dark or so
-    // washed out that nothing can be built from it. Same widened window as the sampler, for the same
-    // reason - a bright wallpaper colour is a perfectly good theme colour.
-    .map((c) => ({ ...c, rank: c.s < 0.1 ? 0 : c.s * Math.max(0.18, 1 - Math.abs(c.l - 0.62) * 1.05) }))
-    .sort((a, b) => b.rank - a.rank);
+    // Trust the sampler's ordering: it already sorted by area x vividness, so entry 0 is the colour
+    // the picture actually reads as. Re-ranking by a chroma/luminance formula here is what let a
+    // small patch of deep blue outrank a big pink nebula and paint the whole UI blue.
+    .map((c) => ({ ...c, rank: c.s < 0.1 ? 0 : c.s * Math.max(0.06, 1 - Math.abs(c.l - 0.62) * 1.05) }));
 
-  const usable = sampled[0] && sampled[0].rank > 0.04;
-  const hue = usable ? sampled[0].h : 214;                       // calm steel blue when the art is grey
+  const seed = sampled[0];
+  const usable = seed && seed.rank > 0.02;
+  const hue = seed && seed.h !== undefined ? seed.h : 214;
   // Saturation comes from the most colourful usable entry, not from the seed itself. The seed is
   // usually the *largest* area, which on a night sky or a nebula is a near-black that carries the
   // right hue but almost no colour - clamping to its own saturation is what turned a vivid pink
