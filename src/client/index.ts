@@ -619,7 +619,7 @@ function applyWindow(value: SkinValue, mode: Mode, fade = false): void {
 // ── panel translucency + image alpha (shared slider) ────────────────────────
 
 function applyPanelOpacity(value: SkinValue, mode: Mode): void {
-  let style = document.getElementById(PANEL_STYLE_ID) as HTMLStyleElement | null;
+  const style = soleStyle(PANEL_STYLE_ID);
   const opacity = Number(value.panelOpacity ?? 100);
   const a = Math.max(0, Math.min(1, opacity / 100));
   // Take the scheme from the theme service rather than the body flag: on a theme switch
@@ -629,11 +629,6 @@ function applyPanelOpacity(value: SkinValue, mode: Mode): void {
   // first accent pass has run.
   const rgb = "var(--dsh-skin-tone, 18, 31, 47)";
   const l = (extra: number) => Math.min(1, a + extra).toFixed(3);
-  if (!style) {
-    style = document.createElement("style");
-    style.id = PANEL_STYLE_ID;
-    document.head.append(style);
-  }
   style.textContent = [
     `body[${BODY_ATTR}] {`,
     // Sticker overlays ride the slider so the skin fades with the panel; the wallpaper
@@ -688,6 +683,34 @@ function applyPanelOpacity(value: SkinValue, mode: Mode): void {
 // level 3 would call an image model.
 
 const ACCENT_STYLE_ID = "dsh-image-skin-accent";
+
+/**
+ * The one stylesheet for `id`.
+ *
+ * Several accent passes can overlap - a theme flip renders while the mutation observer's refresh
+ * and the breathing tick are in flight - and every one of them reaches this before any of them has
+ * appended, so `getElementById` found nothing and *each* appended its own <style>. `getElementById`
+ * then only ever updated the first, while a stale duplicate further down the document won the
+ * cascade: the scheme froze on an old palette *and* an old light/dark choice until a reload, which
+ * is exactly the "I have to refresh before the tint follows" report. Create it in the same
+ * synchronous step it is looked up (no await between), and drop any duplicate left by an earlier run.
+ */
+function soleStyle(id: string): HTMLStyleElement {
+  const all = Array.from(document.querySelectorAll<HTMLStyleElement>(`#${id}`));
+  let style = all[0];
+  if (!style) {
+    style = document.createElement("style");
+    style.id = id;
+    document.head.append(style);
+  }
+  for (const extra of all.slice(1)) extra.remove();
+  return style;
+}
+
+/** Drop every stylesheet carrying `id` (there can be strays - see soleStyle). */
+function dropStyles(id: string): void {
+  document.querySelectorAll<HTMLStyleElement>(`#${id}`).forEach((el) => el.remove());
+}
 const ACCENT_ATTR = "data-dsh-skin-accent";
 const ACCENT_MARK = "data-dsh-accent";
 /** Stamped per element: 1 = the picture is busy under this element, so decoration yields. */
@@ -1827,7 +1850,7 @@ async function fadeImage(url: string, alpha: number): Promise<string> {
 
 /** Reflect the configured level + artwork onto the skeleton. */
 async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refresh = false): Promise<void> {
-  let style = document.getElementById(ACCENT_STYLE_ID) as HTMLStyleElement | null;
+  const style = soleStyle(ACCENT_STYLE_ID);
   const raw = Number(value.accentLevel ?? 0);
   const level = Number.isFinite(raw)
     ? Math.max(0, Math.min(ACCENT_LEVELS.length - 1, Math.round(raw)))
@@ -1842,7 +1865,7 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
 
   if (!wallpaper || value.accentEnabled === false) {
     document.body.removeAttribute(ACCENT_ATTR);
-    style?.remove();
+    dropStyles(ACCENT_STYLE_ID);
     accentTargets.forEach((el) => el.removeAttribute(ACCENT_MARK));
     accentTargets = [];
     return;
@@ -1857,7 +1880,7 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
   const palette = reading?.palette ?? [];
   if (!palette.length) {
     document.body.removeAttribute(ACCENT_ATTR);
-    style?.remove();
+    dropStyles(ACCENT_STYLE_ID);
     return;
   }
 
@@ -1914,11 +1937,6 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
   });
   document.body.setAttribute(ACCENT_ATTR, String(effective));
 
-  if (!style) {
-    style = document.createElement("style");
-    style.id = ACCENT_STYLE_ID;
-    document.head.append(style);
-  }
   const frameUrl = String(value.accentFrame ?? "");
   // The knobs for an applied frame: thickness, strength, and whether it also clothes controls.
   const frameOpts: FrameOptions = {
@@ -1939,7 +1957,7 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
 }
 
 function disposeAccent(): void {
-  document.getElementById(ACCENT_STYLE_ID)?.remove();
+  dropStyles(ACCENT_STYLE_ID);
   document.body.removeAttribute(ACCENT_ATTR);
   document.querySelectorAll<HTMLElement>(`[${ACCENT_MARK}]`).forEach((el) => {
     el.removeAttribute(ACCENT_MARK);
@@ -3905,7 +3923,7 @@ function disposeSkinDom(): void {
   finishButton = null;
   currentEditing = null;
   document.getElementById(STYLE_ID)?.remove();
-  document.getElementById(PANEL_STYLE_ID)?.remove();
+  dropStyles(PANEL_STYLE_ID);
   disposeAccent();
 }
 
