@@ -3,6 +3,31 @@
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
 > Each version starts with a Chinese summary, followed by the detailed English entries.
 
+## Unreleased — 2026-09-27
+
+### 白块消失：卡片部件 & 「让位」控件都收敛成单色
+
+- **「Agent 预设」页里，标题 / 描述 / 代码行底下垫着一层浅色板**，看着像“文字 P 上去的”。
+  根因是选择器 `[class*="_card"]` 太贪：它本意是管“卡片容器”，却把 DSH 的**卡片部件**
+  （`_cardHead` / `_cardName` / `_cardDesc` / `_cardFoot` / `_cardId`）也一并命中，于是给文字底下
+  垫了一层面板色。改为只匹配**整张卡片**（类名以 `_card` 结尾，或 `_card` 后面还跟着另一个类）。
+- **「让位」（画面太忙时装饰退让）在浅色下拿白色打底** → 周围是染色玻璃，它反而更白，
+  就成了一堆刺眼的白按钮。改为退进**我们自己的色系**（面板同色、更低透明度），变成单色、安静的一档。
+- 影响面：设置弹窗的权限 / 语言 / 外观 / 各项下拉、会话列表的「展开其余会话」、欢迎页的「预览版」等——一并收敛。
+
+### Cards and "yielding" controls stop painting white blocks
+
+- On the **Agent presets** page the title / description / code line sat on a pale slab ("text pasted on").
+  The selector `[class*="_card"]` was too greedy: it meant "card containers" but also matched DSH's
+  **card parts** (`_cardHead`, `_cardName`, `_cardDesc`, `_cardFoot`, `_cardId`). It now matches only
+  whole cards — a class ending in `_card`, or `_card` followed by another class.
+- The "yield" rule (decoration steps back where the picture is busy) used a **white** wash in light
+  mode, which sat *brighter* than the tinted glass around it and read as a glaring block. It now
+  steps back inside our own colour family — the panel's tone at a lower alpha — so a quiet control
+  stays monochrome.
+- Affects the settings dialog (permission / language / appearance rows and their dropdowns), the
+  session list's "show more" row and the welcome card's "preview" chip.
+
 ## 0.4.0 — 2026-09-25
 
 ### 浅色模式的面重做 + 换图即时跟色

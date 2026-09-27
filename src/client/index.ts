@@ -692,7 +692,11 @@ function applyPanelOpacity(value: SkinValue, mode: Mode): void {
     // The welcome card is the obvious one: an opaque #fff card sitting right on top of the
     // backdrop. Re-point them at the same token, and they follow the slider like everything
     // else.
-    `body[${BODY_ATTR}] [class*="_card"]{`,
+    // Careful: `[class*="_card"]` also matches every *sub-part* DSH names `_cardXxx`
+    // (`_cardHead`, `_cardName`, `_cardDesc`, `_cardFoot`, `_cardId`) - painting those put a pale
+    // panel behind the title / description / code line, which is exactly what read as "文字像 P 上去的".
+    // Match only whole card *containers*: a class ending in `_card`, or `_card` followed by another class.
+    `body[${BODY_ATTR}] [class$="_card"], body[${BODY_ATTR}] [class*="_card "]{`,
     "  background-color: var(--dsw-alias-bg-layer-1, transparent) !important;",
     `}`,
   ].join("\n");
@@ -1782,7 +1786,10 @@ function accentCss(
   // the fix for ornaments fighting the subject.
   lines.push(
     `${root} [${ACCENT_MARK}][data-dsh-skin-busy="1"] {`,
-    `  background-color: rgba(${neutralWash}, ${(cover * 0.22).toFixed(3)}) !important;`,
+    // 让位 must not mean *whiter*: in a light theme a white wash sat brighter than the tinted glass
+    // around it, so a "quiet" control read as a glaring block. Step back inside our own colour
+    // family instead - the panel's own tone, at a lower alpha - so it stays monochrome.
+    `  background-color: rgba(${painting ? panelTone : neutralWash}, ${(painting ? Math.max(0.08, cover * 0.34) : cover * 0.22).toFixed(3)}) !important;`,
     `  background-image: none !important;`,
     `  border-image-source: none !important;`,
     `  outline-color: rgba(${line}, ${(alpha * 0.45).toFixed(3)}) !important;`,
