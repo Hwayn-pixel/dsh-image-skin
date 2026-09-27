@@ -1,50 +1,59 @@
 # dsh-image-skin
 
-**Give your DeepSeek Harness web UI a look of its own.** Upload your own images, GIFs or videos
-and paint them onto the big regions of the interface, stick draggable stickers on the sidebar and
-composer, and dial in how much the panels let through. Everything stays on your machine.
+### Your DSH web UI — but it finally looks like *yours*.
 
-中文说明见下方 [中文](#中文说明) · 作者 [Hwayn](https://github.com/Hwayn-pixel)
+[![npm](https://img.shields.io/npm/v/dsh-image-skin?color=4c8bf5)](https://www.npmjs.com/package/dsh-image-skin)
+[![license](https://img.shields.io/npm/l/dsh-image-skin?color=black)](LICENSE)
+[![tests](https://github.com/Hwayn-pixel/dsh-image-skin/actions/workflows/test.yml/badge.svg)](https://github.com/Hwayn-pixel/dsh-image-skin/actions/workflows/test.yml)
+[![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.1-6b46c1)](#compatibility)
 
-<img src="docs/gallery/gallery.jpg" alt="Four wallpapers: aurora over the Lyngen Alps, the Milky Way over La Silla, a winter night in the mountains, a misty sunrise over a lake" />
+Drop your own **images, GIFs and looping video** onto the big regions of the DeepSeek Harness web
+UI, stick **draggable stickers** on the sidebar and composer, tint the whole interface with
+**colours pulled from your wallpaper**, and decide how much the panels let through.
+No account, no upload, no cloud — **everything stays on your machine.**
 
-*The wallpapers above are public-domain / CC images (see [Credits](#credits--图片致谢)) — pick a few
-you love and the UI becomes yours.*
+中文说明 → **[README.zh-CN.md](README.zh-CN.md)**
+
+<img src="docs/shots/ui-nebula-light.jpg" alt="The DSH web UI over a pink nebula wallpaper: frosted panels and controls tinted to match the artwork (light theme)" />
+
+*The plugin at work — a wallpaper behind frosted panels, with the UI's colours sampled from the
+picture. Everything you see here is local: the image, the palette, the stickers.*
+
+---
+
+## Highlights
+
+| | |
+|---|---|
+| 🖼️ **Per-region artwork** | Window backdrop, center column, sidebar, welcome/empty state, right panel, composer — each with its own image, fit mode and on/off switch. |
+| 🎬 **Motion** | A looping `mp4`/`webm` as the window backdrop, GIFs anywhere, one slider for playback rate. |
+| 🌗 **Light *and* dark, configured separately** | Two independent sets of artwork; flipping the theme swaps the wallpaper too, and a shared image is the fallback. |
+| 🧸 **Stickers** | Two free-floating images on the sidebar and the composer — drag to move, drag the corner to scale, positions persist. |
+| 🫧 **Panel translucency** | One slider makes DSH's own surfaces see-through so the wallpaper shows through — while the wallpaper itself is deliberately *not* dimmed. |
+| 🎨 **Colour from your picture** | The interface stops looking grey: buttons, inputs, dialogs and rails are painted with a single hue sampled from your wallpaper (a real frame, even for video) and every step is contrast-checked. |
+| ✨ **Optional AI ornament** | A separate switch asks a text-to-image model for a real ornamental frame and wears it as a panel frame — any OpenAI-compatible API, key stays local. |
+| 🪶 **Smooth, and it stays smooth** | Big DOM, long conversation — the cross-fade only animates what a compositor can, and stops touching text colour when the tree gets heavy. |
+| 🔒 **Local-only, and reversible** | Files live in `$DSH_HOME/image-skin/`. Disable the plugin and every style, sticker and video layer it added goes away. |
 
 ## Why this one
 
 There are several plugins in this space, and most of them do the same thing: take one picture and
 generate a colour palette from it. This one takes the opposite approach — **you place artwork
-exactly where you want it**, and it does a few things the others do not:
+exactly where you want it** — and does a few things the others do not:
 
-- **Per-region artwork** — window backdrop, center column, sidebar, welcome/empty state, right
-  panel, composer area. Each region gets its own image, its own fit mode, its own on/off switch.
-  *(one picture → palette; that is not what this is)*
-- **Motion** — a looping `mp4`/`webm` video as the window backdrop, GIFs anywhere, and a playback
-  rate slider that applies to every video the plugin renders.
-- **Light and dark, configured separately** — two independent sets of artwork, so the theme flip
-  swaps wallpaper too. A shared image acts as the fallback for whichever mode has no override.
-- **Stickers** — two free-floating images anchored to the sidebar and the composer; drag to move,
-  drag the corner to scale; positions persist.
-- **Panel translucency** — one slider makes DSH's own surfaces see-through so the wallpaper shows;
-  the wallpaper itself is deliberately *not* dimmed by it.
-- **Colour that comes from your picture** — the plugin paints the *skeleton* (buttons, inputs,
-  dialogs, the rail behind them) with colours sampled from your wallpaper, so the interface stops
-  looking grey. All of it is local and offline, and a video backdrop is sampled from a real frame.
-  The whole scheme is built from a single hue — the sampler's colours are reduced to one, every role
-  (hairline / ink / surface) is derived from it, and each step is contrast-checked — so it harmonises
-  instead of clashing. The **depth slider** only decides how deeply the colour is laid on
-  (淡 / 标准 / 浓 / 呼吸), never what gets drawn.
-- **Optional AI ornament** — a separate switch asks a text-to-image model for a real ornamental
-  frame (corner flourishes and a repeating edge, no text, no figures) and wears it as a panel frame.
-  Any OpenAI-compatible image API will do, and Alibaba's Model Studio (通义万相 / 千问) is supported
-  through its own submit-and-poll protocol; the key stays on your machine, and the sampled colours
-  ride along in the prompt so the ornament comes back in your wallpaper's palette.
-- **Smooth, and it stays smooth** — the light/dark cross-fade animates only what a compositor can
-  animate, and on a heavy DOM it stops touching text colour, which is what makes other
-  implementations stutter on a long conversation.
-- **Local-only, and reversible** — files live in `$DSH_HOME/image-skin/` and are served from your
-  own machine. Disable the plugin and every style, sticker and video layer it added goes away.
+- **Artwork, not just a palette.** A window backdrop, a sidebar image, a sticker you can drag — these
+  are first-class here. (A single auto-picked colour scheme is *not* what this is.)
+- **The whole scheme from one hue.** The sampler's colours are reduced to a single hue; every role
+  (hairline / ink / surface) is derived from it and contrast-checked, so the UI *harmonises* instead
+  of clashing. The **depth slider** only decides how deeply the colour is laid on
+  (淡 / 标准 / 浓 / 呼吸), never *what* gets drawn.
+- **Built for the long haul.** Other implementations stutter on a long conversation; this one only
+  animates compositor-friendly properties and drops text-colour work on heavy trees.
+- **Reversible by design.** Turn it off and nothing is left behind.
+
+<img src="docs/shots/ui-fjord-light.jpg" alt="The same UI over a blue fjord wallpaper — the frosted panels and palette follow the new picture" />
+
+*Same interface, another wallpaper — panels, hairlines and ink all re-derive from the new picture.*
 
 ## Install
 
@@ -150,9 +159,20 @@ branches (bad provider, missing key, non-JSON reply, 401, unreachable host).
 2. add the same id and a label to `AREAS` in `src/client/index.ts`;
 3. add a `REGION_SELECTORS` entry, and clean it up in `disposeSkinDom()` if it adds DOM.
 
+## A note on maintenance 🐢
+
+This is a **student side-project**. I build it in the gaps between classes and coursework, so
+replies and fixes can be slow — please bear with me.
+
+That said: **issues, ideas and pull requests are genuinely welcome**, and I read every one.
+If you enjoy the plugin, a ⭐ helps a lot — it tells me the thing is worth coming back to.
+
 ## Credits / 图片致谢
 
-The gallery images are not part of the plugin; they are licensed wallpapers used to illustrate it.
+The gallery images are not part of the plugin; they are licensed wallpapers used to illustrate the
+docs.
+
+<img src="docs/gallery/gallery.jpg" alt="Four licensed wallpapers" />
 
 | File | Author | License |
 |---|---|---|
@@ -172,78 +192,3 @@ repository.
 ## License
 
 MIT — see [LICENSE](LICENSE).
-
----
-
-## 中文说明
-
-**给你的 DeepSeek Harness 网页界面换上一副自己的样子。** 上传你自己的图片、GIF 或视频，铺到界面的
-几个大区域上；往侧栏和输入框贴能拖动、能缩放的角标；再调调面板透不透。图片全部只存本机。
-
-上面那四张壁纸是公有领域 / CC 授权的图（见 [图片致谢](#credits--图片致谢)）——挑几张你喜欢的，界面就成你的了。
-
-### 为什么用这个
-
-这个领域里已有几个插件，大多做的是同一件事：拿一张图，自动生成一套配色。这个插件的思路相反——**你把画面
-放到你想要的位置**，而且多做了几件别家没做的：
-
-- **按区域换图**：窗口背景 / 中栏 / 侧边栏 / 欢迎页 / 右栏 / 输入区，每个区域各自的图、各自的填充方式、
-  各自的开关。（"一张图→配色"不是它。）
-- **动态**：窗口背景支持循环 `mp4` / `webm` 视频，各处都能放 GIF，还有一个播放速率滑块统一控制。
-- **浅色深色分开配**：两套独立的图，切主题时连壁纸一起换；没单独配的模式会自动回退到"共用图"。
-- **角标**：侧栏和输入框上各贴一个，拖动移动、拖角缩放，位置会记住。
-- **面板不透明度**：一个滑块让 DSH 自己的面板变半透明、透出壁纸；**壁纸本身不会被调暗**。
-- **配色取自你的画面**：除了壁纸，插件还能给界面的“骨架”（按钮、输入框、弹窗、它们背后的轨）染上从壁纸里
-  取出来的颜色，不让界面一直发灰。**全部在本机算、不联网**，视频壁纸也会真采一帧。整套路数建立在**一个色相**上：
-  采样到的几种颜色收敛成一个，每个角色（描边 / 墨色 / 面色）从它派生、逐个校验对比度，所以是协调而不是打架。
-  **档位只决定颜色染多深**（淡 / 标准 / 浓 / 呼吸），不决定画什么。
-- **可选：AI 装饰框**：另有一个开关，让生图模型画一张真正的装饰边框（角花 + 连续边饰，只要花纹、不要文字和人），
-  再当作面板边框用。**任何 OpenAI 兼容的生图接口**都能接，Key 只存本机。
-- **顺滑，而且是持续的顺滑**：明暗交叉淡化只动合成器能动的属性；元素多的时候它干脆不碰文字颜色——这正是
-  别家实现会在长对话里卡顿的原因。
-- **只存本机、可一键还原**：文件落在 `$DSH_HOME/image-skin/`，由本机自己提供；禁用插件后它加过的样式、
-  贴图、视频层全部撤掉。
-
-### 安装
-
-```powershell
-dsh plugin --profile web add dsh-image-skin
-# 然后重启 DSH，浏览器 Ctrl+F5
-```
-本地开发用 `dsh plugin --profile web add -w .`；也可以直接跑 `node scripts/install.mjs --profile web`。
-
-### 用法
-
-**设置 → 图片皮肤**，分两级：
-
-*一级——选工作台*：「贴图」管图片，「AI 纹样」管装饰。**窗口没有图就进不了 AI 纹样**（装饰要从那张图里
-取色），而且第一次进去会弹一页「用之前先看这五条」的提示——下面有「不再显示」。
-
-*贴图* 页：
-
-- **正在编辑**：浅色 / 深色分段控件，选的是“你正在配哪一套图”；切换时会同时把界面主题切过去，边配边看。
-- **界面区域** / **角标贴图**：每个区域一张卡片——缩略图、名称、图的来源（浅色专用 / 两模式共用 / 未设置）和操作。
-- **全局效果**：面板不透明度、视频播放速率。
-- **存储**：「清理未使用图片」会回收不再被任何区域引用的文件。
-
-*AI 纹样* 页：颜色深浅档位（0 = 只描一圈细线 … 4 = 最浓）+ 三条配色路线（整屏染色 / 只染三处 / 双声部）+
-取色与材质的读数 + 生图工作台（服务商 / Key / 张数 / 尺寸 / 风格 / 提示词预览 / 结果图墙）。
-
-### 结构
-
-| 文件 | 作用 |
-|------|------|
-| `src/index.ts` | Host 半：注册 `ui-image-skin` 设置命名空间 + 图片上传/存储/回收/服务路由 `/dsh-image-skin/*` |
-| `src/client/index.ts` | 浏览器半：绑定设置、把图片贴到对应区域、注册设置二级菜单 |
-| `cordis.patch.yml` | bundle patch：把插件注册进 web profile |
-| `build.mjs` | 把 TS 编译成 `lib/index.js` + `lib/client.js` |
-| `test/host.test.mjs` | 宿主半离线测试（路由 / 上传上限 / GC / 路径穿越 / AI 纹样全分支 / 通义异步任务） |
-| `tools/demo-provider.mjs` | 本机假生图服务（`npm run demo:provider`），无 key 也能跑通“生成→图墙→应用” |
-
-**扩展新区域**：`src/index.ts` 的 `IMAGE_AREAS` 加一个 id（schema 自动生成字段）→
-`src/client/index.ts` 的 `AREAS` 加同 id + 标签 → 加 `REGION_SELECTORS` 并在 `disposeSkinDom()` 里清理。
-其余（设置菜单、上传路由、存储、回收）自动生效。
-
-### 许可
-
-MIT — 见 [LICENSE](LICENSE)。
