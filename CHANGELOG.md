@@ -3,7 +3,7 @@
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
 > Each version starts with a Chinese summary, followed by the detailed English entries.
 
-## Unreleased — 2026-09-27
+## 0.4.1 — 2026-09-27
 
 ### 白块消失：卡片部件 & 「让位」控件都收敛成单色
 
