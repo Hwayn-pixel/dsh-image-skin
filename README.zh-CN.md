@@ -3,13 +3,14 @@
 > ⚠️ **桌面版（Electron 应用）必读。** **≤ 0.4.1** 的版本声明了客户端服务 `settingsScope`，而 DSH **0.2 把它去掉了**。
 > DSH 0.2 把"永远不激活的客户端条目"当成**致命错误**，于是桌面版会直接拒绝启动：
 > `web boot: 1 entry did not activate — dsh-image-skin: pending (waiting for service: settingsScope)`。
-> **0.4.2 及以后没有问题。** 如果你的安装器只给 0.4.1，那是包管理器的 *minimum release age* 策略把新版拦住了：
-> 换成用 `npm` 装（`npm i dsh-image-skin@latest`），或在 DSH profile 的 `pnpm-workspace.yaml` 里加：
-> ```yaml
-> minimumReleaseAgeExclude:
->   - dsh-image-skin@0.4.6
+> **0.4.2 及以后没有问题。** 如果你的安装器总是给你 0.4.1，就**点名要版本**——指定具体版本可以绕过年龄策略：
 > ```
-> 然后重启应用。（应用自己的 **「禁用第三方插件…」** 按钮也能先把你救进去。）
+> dsh plugin --profile web add dsh-image-skin@0.4.7     # 或在 profile 里：pnpm add dsh-image-skin@0.4.7
+> ```
+> 不带版本的 `... add dsh-image-skin` 是**范围**解析，而 pnpm 的 `minimumReleaseAge` 只会自动挑"发布时间够久（约 6 小时）"的版本——
+> 所以它可能静默给你一个旧版，或者在你要求的新版本太新时直接报
+> `The latest release of dsh-image-skin is "0.4.3"`。
+> （应用自己的 **「禁用第三方插件…」** 按钮也能先把你救进去。）
 
 ### 给你的 DSH 网页界面，换上一副**属于你自己**的样子。
 

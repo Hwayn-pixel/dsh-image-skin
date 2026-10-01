@@ -13,15 +13,15 @@
 > `settingsScope`, which DSH **0.2 removed**. DSH 0.2 treats a client entry that never activates as a
 > **fatal boot error**, so the desktop app refuses to start:
 > `web boot: 1 entry did not activate — dsh-image-skin: pending (waiting for service: settingsScope)`.
-> **0.4.2 and newer are fine.** If your installer only offers 0.4.1, that is the package manager's
-> *minimum release age* policy holding back the newer versions — either install with `npm`
-> (`npm i dsh-image-skin@latest`), or add this to the DSH profile's `pnpm-workspace.yaml`:
-> ```yaml
-> minimumReleaseAgeExclude:
->   - dsh-image-skin@0.4.6
+> **0.4.2 and newer are fine.** If your installer keeps handing you 0.4.1, ask for the version **by
+> name** — a pinned install bypasses the age policy:
 > ```
-> then restart the app. (The app's own **“禁用第三方插件… / disable third-party plugins”** recovery
-> button also gets you back in.)
+> dsh plugin --profile web add dsh-image-skin@0.4.7     # or: pnpm add dsh-image-skin@0.4.7
+> ```
+> A plain `... add dsh-image-skin` resolves a *range*, and pnpm's `minimumReleaseAge` only auto-picks
+> versions older than its window (~6 hours) — so it can silently give you an old build, or error with
+> `The latest release of dsh-image-skin is "0.4.3"` when the range you asked for is too new.
+> (The app's own **“禁用第三方插件… / disable third-party plugins”** recovery button also gets you back in.)
 
 Drop your own **images, GIFs and looping video** onto the big regions of the DeepSeek Harness web
 UI, stick **draggable stickers** on the sidebar and composer, tint the whole interface with
