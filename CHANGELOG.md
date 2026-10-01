@@ -1,7 +1,16 @@
 # Changelog
 
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
-> Each version starts with a Chinese summary, followed by the detailed English entries.
+> Each version starts with a Chinese summary, followed by the detailed English entries.## 0.4.4 — 2026-10-01
+
+### 补上 0.4.3 漏掉的一半
+
+- 0.4.3 只改了渲染端（阶梯插值 + 滑块 `step`），但**宿主侧的设置 schema** 还是
+  `z.number().step(1)` —— 于是拖出来的 2.5 **存不住**，被挡回整数（实测发现，已补 ✓）。
+- 现在 schema 也是 `step(0.01)`，描述改成“可无级拖动”——**无级滑块这才真正端到端可用**。
+- 实测（桌面端）：alpha 随小数连续变化 `0.359 → 0.354 → 0.3475 → 0.3225` ✓；
+  另有 7 条单元测试钉住插值数学 ✓。
+
 ## 0.4.3 — 2026-10-01
 
 ### 染色滑块改成无极的
