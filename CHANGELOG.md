@@ -2,6 +2,26 @@
 
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
 > Each version starts with a Chinese summary, followed by the detailed English entries.
+## 0.4.3 — 2026-10-01
+
+### 染色滑块改成无极的
+
+- **症状**（小肖报）：染色的滑块拖起来一卡一卡的 ✗。
+- **根因**：等级被当成**数组下标**用（`cover[...][level]` / `alpha[...][level]`），滑块 `step` 也是 `1`
+  ——所以它天生就是**五级台阶**，拖到头就跳一下。
+- **改法**：阶梯变成**连续的坡**——等级可以是小数（如 2.5），在相邻两档之间**线性插值**；滑块 `step` 改成
+  0.01；档位名（`2 · 轻染`）仍按**最近的**那一档显示，点刻度也还是精确跳档 ✓。
+- **测试**：把插值提成纯函数 `rampLadder` 并加了 7 条单元测试（端点精确、2.5→0.355、2.25→0.3425、
+  单调、越界钳位 ✓）——"拖起来顺不顺"这件事，现在是**被测试钉住**的，不靠肉眼。
+
+### Stepless accent slider
+- The level used to index arrays (`cover[level]`, `alpha[level]`) with `step: 1` - a five-rung
+  staircase, which is exactly what made dragging feel notchy.
+- It is now a **continuous ramp**: the level may be fractional (2.5) and interpolates linearly
+  between neighbouring stops; the slider steps by 0.01; the caption still names the *nearest* rung,
+  and clicking a tick still jumps exactly to it.
+- The interpolation is a pure function (`rampLadder`) with 7 unit tests, so "does it drag smoothly"
+  is pinned by tests instead of by eye.
 
 ## 0.4.2 — 2026-09-30
 

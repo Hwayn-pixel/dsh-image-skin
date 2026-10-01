@@ -1807,6 +1807,26 @@ interface FrameOptions {
   controls: boolean;
 }
 
+/** The rung values per mode: how much wallpaper stays visible, and how strong the hairline is. */
+export const ACCENT_COVER: Record<string, number[]> = {
+  dark: [0.06, 0.34, 0.52, 0.64, 0.72],
+  light: [0.08, 0.42, 0.6, 0.7, 0.78],
+};
+export const ACCENT_ALPHA = [0.22, 0.28, 0.33, 0.38, 0.43];
+
+/**
+ * The ladder is a *ramp*, not a set of rungs: the level arrives as a float (the slider is
+ * stepless), so interpolate between the two neighbouring stops. Indexing the array - which is
+ * what this used to do - is exactly what made dragging feel notchy.
+ * Exported so it can be pinned by a test: the interruption-free feel is a property of this math.
+ */
+export function rampLadder(stops: number[], x: number): number {
+  const i = Math.max(0, Math.min(stops.length - 1, x));
+  const lo = Math.floor(i);
+  const hi = Math.min(stops.length - 1, lo + 1);
+  return stops[lo] + (stops[hi] - stops[lo]) * (i - lo);
+}
+
 function accentCss(
   palette: string[],
   level: number,
@@ -1849,8 +1869,18 @@ function accentCss(
   // How much of the wallpaper the surfaces cover, per rung. Level 0 is a whisper (the hairline is
   // the visible thing); by 4 the ladder is at its most solid. Depth comes from the *steps between*
   // rungs - this knob only decides how much picture stays visible underneath.
-  const cover = (mode === "dark" ? [0.06, 0.34, 0.52, 0.64, 0.72] : [0.08, 0.42, 0.6, 0.7, 0.78])[level] ?? 0.06;
-  const alpha = [0.22, 0.28, 0.33, 0.38, 0.43][level] ?? 0.22;
+  //
+  // The ladder is a *ramp*, not a set of rungs: the level arrives as a float (the slider is
+  // stepless), so interpolate between the two neighbouring stops. Indexing the array - which is
+  // what this used to do - is exactly what made dragging feel notchy.
+  const ramp = (stops: number[], x: number): number => {
+    const i = Math.max(0, Math.min(stops.length - 1, x));
+    const lo = Math.floor(i);
+    const hi = Math.min(stops.length - 1, lo + 1);
+    return stops[lo] + (stops[hi] - stops[lo]) * (i - lo);
+  };
+  const cover = ramp(ACCENT_COVER[mode] ?? ACCENT_COVER.dark, level);
+  const alpha = ramp(ACCENT_ALPHA, level);
   const hairline = (sel: string) =>
     `${sel}:not(:focus-visible) {\n  outline: 1px solid rgba(${line}, ${alpha}) !important;\n  outline-offset: -1px !important;\n}`;
 
@@ -2008,9 +2038,8 @@ async function fadeImage(url: string, alpha: number): Promise<string> {
 async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refresh = false): Promise<void> {
   const style = soleStyle(ACCENT_STYLE_ID);
   const raw = Number(value.accentLevel ?? 0);
-  const level = Number.isFinite(raw)
-    ? Math.max(0, Math.min(ACCENT_LEVELS.length - 1, Math.round(raw)))
-    : 0;
+  // Keep the fraction: the slider is stepless and the ladder interpolates between stops.
+  const level = Number.isFinite(raw) ? Math.max(0, Math.min(ACCENT_LEVELS.length - 1, raw)) : 0;
   const wallpaper = resolveAreaImage(value, "window", mode);
 
   // The raw level goes to the stylesheet: 0-2 choose the local weight, and 3-4 use the generated
@@ -2877,24 +2906,26 @@ function AccentRow(props: {
   onToggle: (on: boolean) => void;
 }): React.ReactElement {
   const h = React.createElement;
-  const level = Math.max(0, Math.min(ACCENT_LEVELS.length - 1, Math.round(props.level)));
-  const [shown, setShown] = React.useState(level);
+  const level = Math.max(0, Math.min(ACCENT_LEVELS.length - 1, Number.isFinite(props.level) ? props.level : 0));
+  // The label names the *nearest* rung; the value itself stays fractional, so the slider is stepless.
+  const nearest = Math.round(level);
+  const [shown, setShown] = React.useState(nearest);
   const [visible, setVisible] = React.useState(true);
   const fadeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Cross-fade the caption: fade the old label out, swap, fade the new one in.
   React.useEffect(() => {
-    if (level === shown) return;
+    if (nearest === shown) return;
     setVisible(false);
     if (fadeTimer.current) clearTimeout(fadeTimer.current);
     fadeTimer.current = setTimeout(() => {
-      setShown(level);
+      setShown(nearest);
       setVisible(true);
     }, 140);
     return () => {
       if (fadeTimer.current) clearTimeout(fadeTimer.current);
     };
-  }, [level, shown]);
+  }, [nearest, shown]);
 
   React.useEffect(
     () => () => {
@@ -2936,7 +2967,7 @@ function AccentRow(props: {
       type: "range",
       min: 0,
       max: ACCENT_LEVELS.length - 1,
-      step: 1,
+      step: 0.01,
       value: level,
       disabled: !props.enabled,
       onChange: (e: any) => props.onChange(Number(e.target.value)),
@@ -2951,7 +2982,7 @@ function AccentRow(props: {
             key: l.name,
             type: "button",
             className: "dshImgSkin-tickBtn",
-            "data-on": String(i === level),
+            "data-on": String(i === nearest),
             disabled: !props.enabled,
             onClick: () => props.onChange(i),
           },

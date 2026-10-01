@@ -189,5 +189,22 @@ check(
   mod.windowHasArtwork({ centerImage: "c.png", stickerSidebarImage: "s.png" }) === false,
 );
 
+// ── 染色阶梯是一条“坡”，不是“台阶” ────────────────────────────────────────────
+// The slider is stepless, so the level can be 2.5. When the ladder indexed its arrays the tint
+// snapped between rungs and dragging felt notchy (小肖 reported "一卡一卡的"). Pin the math.
+console.log("\n== accent ramp ==");
+{
+  const ramp = mod.rampLadder;
+  const alpha = mod.ACCENT_ALPHA;
+  const cover = mod.ACCENT_COVER.dark;
+  check("rampLadder is exposed", typeof ramp === "function");
+  check("hits the stops exactly", ramp(alpha, 2) === 0.33 && ramp(alpha, 3) === 0.38, `${ramp(alpha, 2)}/${ramp(alpha, 3)}`);
+  check("interpolates halfway (2.5)", Math.abs(ramp(alpha, 2.5) - 0.355) < 1e-9, String(ramp(alpha, 2.5)));
+  check("interpolates a quarter step (2.25)", Math.abs(ramp(alpha, 2.25) - 0.3425) < 1e-9, String(ramp(alpha, 2.25)));
+  check("is monotonic between rungs", ramp(alpha, 0) < ramp(alpha, 1.5) && ramp(alpha, 1.5) < ramp(alpha, 4), "");
+  check("clamps out-of-range input", ramp(alpha, -3) === alpha[0] && ramp(alpha, 99) === alpha[4], "");
+  check("cover ramp interpolates too", Math.abs(ramp(cover, 0.5) - 0.2) < 1e-9, String(ramp(cover, 0.5)));
+}
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
