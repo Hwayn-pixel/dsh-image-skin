@@ -157,9 +157,16 @@ function fakeScope(initial) {
 {
   const scope = mod.createSettingsScope(fakeContext({}));
   check("no settings face: the snapshot stays empty", scope.getSnapshot().status === "loading" && scope.getSnapshot().value === undefined);
-  let rejected = false;
-  await scope.set("windowImage", "x.png").catch(() => (rejected = true));
-  check("no settings face: set() rejects instead of throwing synchronously", rejected);
+  let resolved = true;
+  await scope.set("windowImage", "x.png").then(
+    () => {},
+    () => {
+      resolved = false;
+    },
+  );
+  // 契约变更（2026-10-01）：设置还没绑定时**排队等就绪**，不再 reject ——
+  // 旧行为会在“刚装完第一次启动”时往控制台丢一个红色 “settings are not ready” 错误。
+  check("no settings face: set() queues instead of rejecting", resolved);
 }
 
 console.log("== per-mode image resolution ==");

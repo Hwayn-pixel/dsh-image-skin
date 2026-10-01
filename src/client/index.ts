@@ -98,6 +98,7 @@ function adaptConfigForm(form: ConfigFormFace): Scope<SkinValue> {
 export function createSettingsScope(ctx: ClientContext): Scope<SkinValue> {
   const listeners = new Set<() => void>();
   let provider: Scope<SkinValue> | null = null;
+  const queued: Array<[string, unknown, boolean]> = [];
   let snapshot: Snapshot<SkinValue> = { status: "loading", value: undefined };
 
   const notify = () => {
@@ -111,6 +112,18 @@ export function createSettingsScope(ctx: ClientContext): Scope<SkinValue> {
   };
   const bind = (scope: Scope<SkinValue>): (() => void) => {
     provider = scope;
+    // Anything the UI asked for before the Host handed us a settings face is applied now, in
+    // order. (Rejecting instead - which is what this used to do - showed up as a red
+    // "dsh-image-skin: settings are not ready" error right after a fresh install.)
+    while (queued.length) {
+      const [field, value, isUnset] = queued.shift() as [string, unknown, boolean];
+      try {
+        if (isUnset) void scope.unset(field);
+        else void scope.set(field, value);
+      } catch {
+        /* a queued write must never break the binding */
+      }
+    }
     const sync = () => {
       const next = scope.getSnapshot();
       snapshot = { status: next.status ?? (next.value === undefined ? "loading" : "ready"), value: next.value };
@@ -151,8 +164,20 @@ export function createSettingsScope(ctx: ClientContext): Scope<SkinValue> {
         listeners.delete(listener);
       };
     },
-    set: (field, value) => (provider === null ? Promise.reject(new Error("dsh-image-skin: settings are not ready")) : provider.set(field, value)),
-    unset: (field) => (provider === null ? Promise.reject(new Error("dsh-image-skin: settings are not ready")) : provider.unset(field)),
+    set: (field, value) => {
+      if (provider === null) {
+        queued.push([field, value, false]);
+        return Promise.resolve();
+      }
+      return provider.set(field, value);
+    },
+    unset: (field) => {
+      if (provider === null) {
+        queued.push([field, undefined, true]);
+        return Promise.resolve();
+      }
+      return provider.unset(field);
+    },
   };
 }
 

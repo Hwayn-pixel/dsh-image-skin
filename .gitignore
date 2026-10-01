@@ -11,3 +11,6 @@ node_modules/
 *.bak
 *.bak_*
 
+
+*.bak*
+*.bak_*
