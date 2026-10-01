@@ -1827,6 +1827,39 @@ export function rampLadder(stops: number[], x: number): number {
   return stops[lo] + (stops[hi] - stops[lo]) * (i - lo);
 }
 
+/**
+ * Everything `accentCss` needs apart from the level, kept from the last full pass.
+ *
+ * Why: a level change used to require a store round-trip, a fresh artwork read and a re-scan of
+ * every accent target before anything moved - so the slider arrived and the colour crawled in
+ * afterwards. With these cached, a drag can repaint the sheet synchronously, in single-digit ms.
+ */
+let accentPreviewInputs: {
+  palette: string[];
+  mode: Mode;
+  artUrl: string;
+  reading: ArtworkReading | null | undefined;
+  frameOpts: FrameOptions;
+  colourStyle: ColourStyle;
+} | null = null;
+
+/**
+ * Repaint the accent sheet for a new level *right now*, reusing the cached palette/artwork.
+ * No store write, no artwork read, no target re-scan - this is what makes dragging feel live.
+ * The commit (store write) still happens on release, so nothing is lost.
+ */
+export function previewAccentLevel(level: number): void {
+  const inputs = accentPreviewInputs;
+  if (!inputs) return;
+  try {
+    const style = soleStyle(ACCENT_STYLE_ID);
+    style.textContent = accentCss(inputs.palette, level, inputs.mode, inputs.artUrl, inputs.reading, inputs.frameOpts, inputs.colourStyle);
+    document.body.setAttribute(ACCENT_ATTR, String(level));
+  } catch {
+    /* a preview must never break the panel */
+  }
+}
+
 function accentCss(
   palette: string[],
   level: number,
@@ -1899,13 +1932,14 @@ function accentCss(
     `  background-color: rgba(${panelFill}, ${(cover * 0.92).toFixed(3)}) !important;`,
     `  background-image: ${surfaceGradient(toDark, cover * 0.2)} !important;`,
     `  box-shadow: ${litEdge} rgba(${lightTint}, .30) !important;`,
-    `  transition: background-color 4s ease, outline-color 4s ease, box-shadow 4s ease !important;`,
+    `  transition: background-color var(--dsh-skin-tint-ms, 4s) ease, outline-color var(--dsh-skin-tint-ms, 4s) ease, box-shadow var(--dsh-skin-tint-ms, 4s) ease !important;`,
     `}`,
     `${small} {`,
     `  background-color: rgba(${controlFill}, ${cover.toFixed(3)}) !important;`,
     `  background-image: ${surfaceGradient(toDark, cover * 0.24)} !important;`,
     `  box-shadow: ${litEdge} rgba(${lightTint}, .22) !important;`,
-    `  transition: background-color .18s ease, filter .18s ease, transform .18s ease, outline-color .18s ease !important;`,
+    // Controls stay snappy; the slow (4s) panel transition is for the breathing drift only.
+    `  transition: background-color .18s ease var(--dsh-skin-delay, 0s), filter .18s ease, transform .18s ease, outline-color .18s ease var(--dsh-skin-delay, 0s) !important;`,
     `}`,
   );
   // 让位 (yield): where the picture is busy, decoration steps back - less tint, no gradient, no
@@ -2111,8 +2145,12 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
   accentTargets = scanAccentTargets();
   const vw = Math.max(1, window.innerWidth);
   const vh = Math.max(1, window.innerHeight);
-  accentTargets.forEach((el) => {
+  accentTargets.forEach((el, index) => {
     el.setAttribute(ACCENT_MARK, accentRole(el));
+    // 层次感 (the layered look): a small per-element delay turns a level change into a wave that
+    // travels across the UI instead of every surface snapping at the same instant. Costs nothing
+    // per frame - the browser does the tweening (paired with --dsh-skin-tint-ms while dragging).
+    el.style.setProperty("--dsh-skin-delay", `${(index % 14) * 16}ms`);
     // 让位: look up how busy the picture is under this element's centre.
     //
     // Only for chrome that sits *directly* on the picture. A control inside a panel or a dialog has
@@ -2144,6 +2182,8 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
       : await keyOutBackground(frameUrl)
     : frameUrl;
   const colourStyle = (String(value.accentMode ?? "wash") as ColourStyle) || "wash";
+  // Cache what the live preview needs, then paint the real sheet.
+  accentPreviewInputs = { palette, mode, artUrl, reading, frameOpts, colourStyle };
   style.textContent = accentCss(palette, effective, mode, artUrl, reading, frameOpts, colourStyle);
 }
 
@@ -2909,6 +2949,44 @@ function AccentRow(props: {
   const level = Math.max(0, Math.min(ACCENT_LEVELS.length - 1, Number.isFinite(props.level) ? props.level : 0));
   // The label names the *nearest* rung; the value itself stays fractional, so the slider is stepless.
   const nearest = Math.round(level);
+  // 拖拽节流：设置一写，宿主就要重读 + 整面板重渲染 + 整张染色表重建（这才是“卡”的来源）。
+  // 所以拖拽期间最多 ~120ms 写一次，松手时再补最后一次——拖动立刻有反应，但不每像素都落盘。
+  const [dragging, setDragging] = React.useState<number | null>(null);
+  const shownLevel = dragging ?? level;
+  const latest = React.useRef<number | null>(null);
+  const lastWrite = React.useRef(0);
+  const writeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const settleTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onDrag = (v: number) => {
+    setDragging(v);
+    latest.current = v;
+    // While the hand is moving, panels must not crawl along their 4s breathing transition
+    // (that crawl is the "slider first, colour afterwards" the user reported).
+    document.body.style.setProperty("--dsh-skin-tint-ms", "320ms");
+    if (settleTimer.current !== null) clearTimeout(settleTimer.current);
+    settleTimer.current = setTimeout(() => {
+      document.body.style.removeProperty("--dsh-skin-tint-ms");
+      settleTimer.current = null;
+    }, 800);
+    // 立即出效果：用缓存重画样式表（同步、毫秒级）。
+    //
+    // 拖动期间**不写设置** —— 这是关键：每写一次宿主就带着（落后的）档位重画一次，
+    // 于是“实时预览（当前值）”和“落盘重画（旧值）”两个画家互相打断，颜色就会乱飘。
+    // 所以：拖动只画，松手才写（见 commitDrag）。
+    previewAccentLevel(v);
+  };
+  const commitDrag = () => {
+    if (writeTimer.current !== null) {
+      clearTimeout(writeTimer.current);
+      writeTimer.current = null;
+    }
+    if (latest.current !== null) {
+      props.onChange(latest.current);
+      latest.current = null;
+    }
+    setDragging(null);
+  };
+  const nearestShown = Math.round(shownLevel);
   const [shown, setShown] = React.useState(nearest);
   const [visible, setVisible] = React.useState(true);
   const fadeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2968,9 +3046,12 @@ function AccentRow(props: {
       min: 0,
       max: ACCENT_LEVELS.length - 1,
       step: 0.01,
-      value: level,
+      value: shownLevel,
       disabled: !props.enabled,
-      onChange: (e: any) => props.onChange(Number(e.target.value)),
+      onChange: (e: any) => onDrag(Number(e.target.value)),
+      onPointerUp: commitDrag,
+      onKeyUp: commitDrag,
+      onBlur: commitDrag,
     }),
     h(
       "div",
@@ -2982,7 +3063,7 @@ function AccentRow(props: {
             key: l.name,
             type: "button",
             className: "dshImgSkin-tickBtn",
-            "data-on": String(i === nearest),
+            "data-on": String(i === nearestShown),
             disabled: !props.enabled,
             onClick: () => props.onChange(i),
           },
