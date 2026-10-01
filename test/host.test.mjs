@@ -218,6 +218,23 @@ console.log("== delete ==");
   check("newest file still present", listFiles().length === 1, JSON.stringify(listFiles()));
 }
 {
+  // The cross-profile bug (2026-10-01): the store is shared between profiles (web / desktop), but
+  // the sweep only knows the value of *this* profile. A profile with nothing configured used to
+  // delete every aged file - including the wallpaper another profile still pointed at. The
+  // freshness guard alone could not save it (60s), so an empty keep must delete nothing at all.
+  const aged = json(await call("POST", "/dsh-image-skin/upload", JSON.stringify({ image: dataUri })))?.url;
+  const agedName = aged.split("/").pop();
+  const longAgo = new Date(Date.now() - 30 * 60 * 1000);
+  utimesSync(join(home, "image-skin", agedName), longAgo, longAgo);
+  fakeSettings.value = { enabled: true };
+  const report = json(await call("POST", "/dsh-image-skin/gc"));
+  check(
+    "empty keep never sweeps an aged file (cross-profile safety)",
+    existsSync(join(home, "image-skin", agedName)) && (report?.removed?.length ?? 0) === 0,
+    JSON.stringify(report),
+  );
+}
+{
   // A file referenced only by a per-mode override must survive the sweep — the keep set
   // is scanned generically, so new `${area}Image<Mode>` fields have to be covered too.
   const urlPerMode = json(await call("POST", "/dsh-image-skin/upload", JSON.stringify({ image: dataUri })))?.url;

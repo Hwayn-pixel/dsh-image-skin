@@ -563,6 +563,10 @@ function referencedFiles(value: unknown): Set<string> {
 /** Delete stored files nothing references any more; returns a small report. */
 function collectUnused(value: unknown): { removed: string[]; kept: number; freedBytes: number } {
   const keep = referencedFiles(value);
+  // If the resolved settings reference nothing at all, we do not know what is in use — most likely
+  // this profile simply has no image configured yet. Deleting then would wipe files that *another*
+  // profile (desktop vs web) still points at, because the store is shared. So: delete nothing.
+  if (keep.size === 0) return { removed: [], kept: 0, freedBytes: 0 };
   let names: string[] = [];
   try {
     names = readdirSync(skinDir()).filter((n) => FILE_RE.test(n));

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.2
+
+### Fixed
+- **Saved images could disappear after a restart.** The store (`$DSH_HOME/image-skin/`) is shared
+  between profiles (the `web` one and the desktop app), but the sweep only knew the settings of the
+  profile that ran it. A profile with **no image configured** therefore deleted every aged file —
+  including a wallpaper that *another* profile still pointed at. An empty reference set now deletes
+  nothing at all; the 60-second freshness guard was never enough on its own.
+
+### 修复
+- **存到本机的图，重启后会消失。** 存储目录（`$DSH_HOME/image-skin/`）是各 profile（网页版 / 桌面端）
+  **共用**的，而清理只认"发起清理那个 profile"的配置。于是**一张图都没配**的那个 profile 会把所有"够老"的
+  文件全删——包括**另一个 profile 还在引用**的那张壁纸。现在：**引用集为空就一个都不删**；
+  那道 60 秒的"太新不判"保护本来就不够。
+
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
 > Each version starts with a Chinese summary, followed by the detailed English entries.
 
