@@ -16,11 +16,17 @@
 > **0.4.2 and newer are fine.** If your installer keeps handing you 0.4.1, ask for the version **by
 > name** — a pinned install bypasses the age policy:
 > ```
-> dsh plugin --profile web add dsh-image-skin@0.4.7     # or: pnpm add dsh-image-skin@0.4.7
+> dsh plugin --profile web add dsh-image-skin@0.4.8     # or: pnpm add dsh-image-skin@0.4.8
 > ```
 > A plain `... add dsh-image-skin` resolves a *range*, and pnpm's `minimumReleaseAge` only auto-picks
 > versions older than its window (~6 hours) — so it can silently give you an old build, or error with
 > `The latest release of dsh-image-skin is "0.4.3"` when the range you asked for is too new.
+>
+> **“I want the newest build right now”** — go straight to the official registry (mirrors lag minutes):
+> ```
+> npm i dsh-image-skin@latest --registry=https://registry.npmjs.org/
+> ```
+> (No mirror of your own? `dsh plugin … add dsh-image-skin@0.4.8` will work too once the mirror catches up.)
 > (The app's own **“禁用第三方插件… / disable third-party plugins”** recovery button also gets you back in.)
 
 Drop your own **images, GIFs and looping video** onto the big regions of the DeepSeek Harness web

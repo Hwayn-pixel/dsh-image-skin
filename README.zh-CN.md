@@ -5,11 +5,17 @@
 > `web boot: 1 entry did not activate — dsh-image-skin: pending (waiting for service: settingsScope)`。
 > **0.4.2 及以后没有问题。** 如果你的安装器总是给你 0.4.1，就**点名要版本**——指定具体版本可以绕过年龄策略：
 > ```
-> dsh plugin --profile web add dsh-image-skin@0.4.7     # 或在 profile 里：pnpm add dsh-image-skin@0.4.7
+> dsh plugin --profile web add dsh-image-skin@0.4.8     # 或在 profile 里：pnpm add dsh-image-skin@0.4.8
 > ```
 > 不带版本的 `... add dsh-image-skin` 是**范围**解析，而 pnpm 的 `minimumReleaseAge` 只会自动挑"发布时间够久（约 6 小时）"的版本——
 > 所以它可能静默给你一个旧版，或者在你要求的新版本太新时直接报
 > `The latest release of dsh-image-skin is "0.4.3"`。
+>
+> **“我现在就要最新版”**——直接走官方源（国内镜像会滞后几分钟）：
+> ```
+> npm i dsh-image-skin@latest --registry=https://registry.npmjs.org/
+> ```
+> （如果你用的就是官方源，等一下镜像同步完，`... add dsh-image-skin@0.4.8` 也可以 ✓。）
 > （应用自己的 **「禁用第三方插件…」** 按钮也能先把你救进去。）
 
 ### 给你的 DSH 网页界面，换上一副**属于你自己**的样子。
