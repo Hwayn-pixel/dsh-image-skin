@@ -7,6 +7,8 @@
 [![tests](https://github.com/Hwayn-pixel/dsh-image-skin/actions/workflows/test.yml/badge.svg)](https://github.com/Hwayn-pixel/dsh-image-skin/actions/workflows/test.yml)
 [![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.1-6b46c1)](#compatibility)
 
+**npm:** [`dsh-image-skin`](https://www.npmjs.com/package/dsh-image-skin) · **one-line install:** `dsh plugin --profile web add dsh-image-skin`
+
 Drop your own **images, GIFs and looping video** onto the big regions of the DeepSeek Harness web
 UI, stick **draggable stickers** on the sidebar and composer, tint the whole interface with
 **colours pulled from your wallpaper**, and decide how much the panels let through.
