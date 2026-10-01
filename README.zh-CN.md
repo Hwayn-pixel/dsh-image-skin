@@ -7,15 +7,16 @@
 > ```
 > dsh plugin --profile web add dsh-image-skin@0.4.8     # 或在 profile 里：pnpm add dsh-image-skin@0.4.8
 > ```
-> 不带版本的 `... add dsh-image-skin` 是**范围**解析，而 pnpm 的 `minimumReleaseAge` 只会自动挑"发布时间够久（约 6 小时）"的版本——
-> 所以它可能静默给你一个旧版，或者在你要求的新版本太新时直接报
-> `The latest release of dsh-image-skin is "0.4.3"`。
+> **桌面版的插件安装框里也请填 `dsh-image-skin@0.4.8`（带版本号），不要只填包名。**
+> 只填包名是**范围**解析：pnpm 的 `minimumReleaseAge`（默认 **一周**）只会自动选“发布满一周”的版本，
+> 所以它可能静默给你一个老版本（今天就是 `0.3.0`），或在你要求的范围太新时直接报
+> `The latest release of dsh-image-skin is …`。**带 `名字@版本` 的写法不受这个限制** ✓。
 >
 > **“我现在就要最新版”**——直接走官方源（国内镜像会滞后几分钟）：
 > ```
 > npm i dsh-image-skin@latest --registry=https://registry.npmjs.org/
 > ```
-> （如果你用的就是官方源，等一下镜像同步完，`... add dsh-image-skin@0.4.8` 也可以 ✓。）
+> （`npm` 没有发布年龄策略，所以那边不带版本也直接拿最新 ✓。）
 > （应用自己的 **「禁用第三方插件…」** 按钮也能先把你救进去。）
 
 ### 给你的 DSH 网页界面，换上一副**属于你自己**的样子。
