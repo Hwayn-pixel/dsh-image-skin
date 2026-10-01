@@ -2,10 +2,17 @@
 /**
  * dsh-image-skin — Host half.
  *
- * Registers the durable `ui-image-skin` settings namespace and owns the image
- * upload / storage / serve routes under `/dsh-image-skin`. Uploaded images live
- * as files in `$DSH_HOME/image-skin/`; the settings document stores only the
- * returned URL (never the multi-MB payload).
+ * Owns the skin value storage contract and the image upload / storage / serve routes
+ * under `/dsh-image-skin`. Uploaded images live as files in `$DSH_HOME/image-skin/`;
+ * the settings document stores only the returned URL (never the multi-MB payload).
+ *
+ * Two Host generations are supported:
+ *  - 0.1 line: registers the durable `ui-image-skin` settings namespace through
+ *    `settings.register`, and reads it back with `settings.get`.
+ *  - 0.2 line (desktop): a settings namespace *is* the owning entry's live Config, so the
+ *    schema is exported as `Config` with every field `.volatile()` and read from the
+ *    resolved Config references. `settings.configure({ auto: false })` keeps the
+ *    automatically generated page quiet because the plugin ships its own section.
  *
  * Storage hygiene: uploads are size-capped, and `POST /gc` deletes stored files
  * that no area references any more (the client calls it after every image
@@ -36,29 +43,87 @@ function settingsNamespace(value: string): string {
   return value;
 }
 
+/**
+ * Whether the schemastery build in use knows the `volatile()` modifier. Hosts of the
+ * 0.2 line resolve a volatile Config field into a live reference (and only volatile
+ * fields are projected into the Client settings mirror); older builds ignore the marker.
+ */
+const VOLATILE_SUPPORTED = typeof (z.string() as unknown as { volatile?: unknown }).volatile === "function";
+
+/** Mark one field live-editable, or leave it alone on a schema runtime without `volatile()`. */
+function live<T>(schema: T): T {
+  return VOLATILE_SUPPORTED ? (schema as unknown as { volatile(): T }).volatile() : schema;
+}
+
 // Data-driven schema: a couple of globals plus a handful of fields per area.
 // Every area carries a *shared* image plus two optional per-mode overrides
 // (light / dark). Resolution order is `<area>Image<Mode>` then `<area>Image`, so a
 // stored config written before per-mode support existed keeps working unchanged.
-const shape: Record<string, unknown> = {
-  enabled: z.boolean().default(true).description("总开关：关闭后所有图片皮肤失效"),
-  panelOpacity: z.number().min(0).max(100).default(85).role("slider").description("UI 面板不透明度（越低越能透出背景图）"),
-  videoPlaybackRate: z.number().min(0.1).max(4).default(1).role("slider").description("视频播放速率（作用于所有上传的视频：窗口壁纸与角标）"),
-};
-for (const area of IMAGE_AREAS) {
-  shape[`${area}Image`] = z.string().default("").description(`${area} 共用图片 URL（浅色/深色都用，可被专用图覆盖）`);
-  shape[`${area}ImageLight`] = z.string().default("").description(`${area} 浅色模式专用图片 URL（留空则回退共用图）`);
-  shape[`${area}ImageDark`] = z.string().default("").description(`${area} 深色模式专用图片 URL（留空则回退共用图）`);
-  shape[`${area}Enabled`] = z.boolean().default(true).description(`${area} 区域启用`);
-  shape[`${area}Fit`] = z
-    .union([z.const("cover"), z.const("contain"), z.const("tile")])
-    .default("cover")
-    .description(`${area} 填充方式`);
-  shape[`${area}OffsetX`] = z.number().default(0).description(`${area} 水平偏移(px)`);
-  shape[`${area}OffsetY`] = z.number().default(0).description(`${area} 垂直偏移(px)`);
-  shape[`${area}Scale`] = z.number().min(10).max(400).default(100).description(`${area} 缩放(%)`);
+//
+// Every field the *Client* half reads or writes has to be declared here, not just the
+// ones the Host itself consumes: a 0.2-line Host refuses a settings write to any path
+// its Config schema does not declare as volatile ("Config field X is not volatile"),
+// and the failure is silent on the wire (the form just recovers). The AI-accent group
+// below exists only for the Client half - the Host never reads it - but it has to be
+// in the schema or the accent sliders stop working on the desktop.
+function buildShape(markLive: boolean): Record<string, unknown> {
+  const mark = <T>(schema: T): T => (markLive ? live(schema) : schema);
+  const shape: Record<string, unknown> = {
+    enabled: mark(z.boolean().default(true).description("总开关：关闭后所有图片皮肤失效")),
+    panelOpacity: mark(z.number().min(0).max(100).default(85).role("slider").description("UI 面板不透明度（越低越能透出背景图）")),
+    videoPlaybackRate: mark(z.number().min(0.1).max(4).default(1).role("slider").description("视频播放速率（作用于所有上传的视频：窗口壁纸与角标）")),
+  };
+  for (const area of IMAGE_AREAS) {
+    shape[`${area}Image`] = mark(z.string().default("").description(`${area} 共用图片 URL（浅色/深色都用，可被专用图覆盖）`));
+    shape[`${area}ImageLight`] = mark(z.string().default("").description(`${area} 浅色模式专用图片 URL（留空则回退共用图）`));
+    shape[`${area}ImageDark`] = mark(z.string().default("").description(`${area} 深色模式专用图片 URL（留空则回退共用图）`));
+    shape[`${area}Enabled`] = mark(z.boolean().default(true).description(`${area} 区域启用`));
+    shape[`${area}Fit`] = mark(
+      z.union([z.const("cover"), z.const("contain"), z.const("tile")]).default("cover").description(`${area} 填充方式`),
+    );
+    shape[`${area}OffsetX`] = mark(z.number().default(0).description(`${area} 水平偏移(px)`));
+    shape[`${area}OffsetY`] = mark(z.number().default(0).description(`${area} 垂直偏移(px)`));
+    shape[`${area}Scale`] = mark(z.number().min(10).max(400).default(100).description(`${area} 缩放(%)`));
+  }
+  // AI 纹样 / 染色深度：默认值必须与浏览器半侧的回退值一致（见 src/client/index.ts）。
+  // Defaults mirror the Client half's `v.field ?? fallback` expressions exactly.
+  shape.accentEnabled = mark(z.boolean().default(true).description("AI 纹样总开关"));
+  shape.accentLevel = mark(z.number().min(0).max(4).step(1).default(0).role("slider").description("染色深度档位：0 最淡，4 最浓"));
+  shape.accentMode = mark(z.string().default("wash").description("配色强度路线"));
+  shape.accentStyle = mark(z.string().default("").description("纹样风格关键词"));
+  shape.accentPalette = mark(z.string().default("").description("取到的调色板（| 分隔）"));
+  shape.accentMaterial = mark(z.string().default("").description("识别出的材质"));
+  shape.accentPromptExtra = mark(z.string().default("").description("附加提示词"));
+  shape.accentProvider = mark(z.string().default("dashscope-wanx").description("生图服务商"));
+  shape.accentKeyMode = mark(z.string().default("env").description("Key 来源：env 或 manual"));
+  shape.accentApiKey = mark(z.string().default("").description("手动填写的生图 Key"));
+  shape.accentKeyEnv = mark(z.string().default("").description("自定义环境变量名"));
+  shape.accentBaseUrl = mark(z.string().default("").description("自定义服务商 Base URL"));
+  shape.accentModel = mark(z.string().default("").description("自定义模型 ID"));
+  shape.accentCount = mark(z.number().min(1).max(4).step(1).default(2).description("每次生成的张数"));
+  shape.accentSize = mark(z.string().default("1024x1024").description("生成尺寸"));
+  shape.accentFrame = mark(z.string().default("").description("当前应用的生成图 URL"));
+  shape.accentFrames = mark(z.string().default("[]").description("生成图历史（JSON 数组）"));
+  shape.accentFrameScale = mark(z.number().min(0.6).max(1.6).default(1).description("生成图缩放"));
+  shape.accentFrameOpacity = mark(z.number().min(0.3).max(1).default(1).description("生成图不透明度"));
+  shape.accentFrameControls = mark(z.boolean().default(false).description("生成图是否带控件"));
+  shape.accentRiskHidden = mark(z.boolean().default(false).description("是否已收起风险提示"));
+  return shape;
 }
-export const ImageSkinSchema = z.object(shape as never).description("DSH 图片皮肤：按区域替换 Web UI 的大块图片");
+
+/** Every settings field the two halves share, in declaration order (pinned by the test suite). */
+export const SKIN_FIELDS: readonly string[] = Object.keys(buildShape(false));
+
+
+/** Durable namespace schema used by 0.1-line Hosts through `settings.register`. */
+export const ImageSkinSchema = z.object(buildShape(false) as never).description("DSH 图片皮肤：按区域替换 Web UI 的大块图片");
+
+/**
+ * The entry's own live Config. A 0.2-line Host projects this schema's volatile fields
+ * into the settings document (`describe`) instead of accepting a registered namespace,
+ * and the Client half reaches it through `configForms.get("ui-image-skin")`.
+ */
+export const Config = z.object(buildShape(true) as never).description("DSH 图片皮肤：按区域替换 Web UI 的大块图片");
 
 const ROUTE_PREFIX = "/dsh-image-skin";
 const DIR_NAME = "image-skin";
@@ -516,6 +581,8 @@ interface HostContext {
   inject(services: readonly string[], fn: (ctx: HostContext) => void): unknown;
   effect(fn: () => (() => void) | void, label?: string): unknown;
   get?(name: string): unknown;
+  /** Own fiber of this plugin instance; a 0.2-line Host keys page policy by it. */
+  fiber?: unknown;
 }
 
 /** Read a request body into a string, refusing anything past `limit` bytes. */
@@ -565,7 +632,7 @@ function collectUnused(value: unknown): { removed: string[]; kept: number; freed
   const keep = referencedFiles(value);
   // If the resolved settings reference nothing at all, we do not know what is in use — most likely
   // this profile simply has no image configured yet. Deleting then would wipe files that *another*
-  // profile (desktop vs web) still points at, because the store is shared. So: delete nothing.
+  // profile (web vs desktop app) still points at, because the store is shared. So: delete nothing.
   if (keep.size === 0) return { removed: [], kept: 0, freedBytes: 0 };
   let names: string[] = [];
   try {
@@ -592,12 +659,48 @@ function collectUnused(value: unknown): { removed: string[]; kept: number; freed
   return { removed, kept: keep.size, freedBytes };
 }
 
-export function apply(ctx: HostContext): void {
+/**
+ * Plain snapshot of the entry's live Config, or `undefined` when this Host resolved the
+ * Config to ordinary values instead of live references (0.1-line default semantics).
+ */
+function liveConfigValue(config: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  if (config === null || typeof config !== "object") return undefined;
+  const value: Record<string, unknown> = {};
+  let live = false;
+  for (const [key, entry] of Object.entries(config)) {
+    if (entry !== null && typeof entry === "object" && typeof (entry as { get?: unknown }).get === "function") {
+      live = true;
+      value[key] = (entry as { get(): unknown }).get();
+    } else {
+      value[key] = entry;
+    }
+  }
+  return live ? value : undefined;
+}
+
+export function apply(ctx: HostContext, config?: Record<string, unknown>): void {
   ctx.inject(["settings"], (settingsCtx) => {
-    (settingsCtx as unknown as { settings: { register(ns: string, schema: unknown): unknown } }).settings.register(
-      settingsNamespace(SETTINGS_NAMESPACE),
-      ImageSkinSchema,
-    );
+    const settings = (
+      settingsCtx as unknown as {
+        settings: {
+          register?(ns: string, schema: unknown): unknown;
+          configure?(presentation: { auto?: boolean }, owner?: unknown): unknown;
+        };
+      }
+    ).settings;
+    if (typeof settings.register === "function") {
+      // 0.1-line Host: the plugin owns a durable settings namespace of its own.
+      settings.register(settingsNamespace(SETTINGS_NAMESPACE), ImageSkinSchema);
+      return;
+    }
+    // 0.2-line Host: this entry's live Config *is* the namespace, so only the
+    // automatically generated page has to stand down (the plugin ships its own).
+    if (typeof settings.configure === "function") {
+      settingsCtx.effect(() => {
+        const undo = settings.configure?.({ auto: false }, ctx.fiber);
+        return typeof undo === "function" ? (undo as () => void) : undefined;
+      }, "dsh-image-skin: own settings page");
+    }
   });
 
   ctx.inject(["webServer"], (httpCtx) => {
@@ -611,6 +714,8 @@ export function apply(ctx: HostContext): void {
       ((httpCtx.get ? httpCtx.get("settings") : undefined) ?? (ctx.get ? ctx.get("settings") : undefined)) as
         | { get(ns: string): unknown }
         | undefined;
+    /** Current skin value on either Host generation: live Config first, legacy namespace second. */
+    const readValue = (): unknown => liveConfigValue(config) ?? readSettings()?.get(SETTINGS_NAMESPACE);
 
     httpCtx.effect(
       () =>
@@ -741,7 +846,7 @@ export function apply(ctx: HostContext): void {
               }
               // POST /dsh-image-skin/gc — delete stored files no area references any more.
               if (req.method === "POST" && url.pathname === `${ROUTE_PREFIX}/gc`) {
-                const value = readSettings()?.get(SETTINGS_NAMESPACE);
+                const value = readValue();
                 if (value === null || typeof value !== "object") {
                   return ok(409, { error: "settings namespace is not ready" });
                 }

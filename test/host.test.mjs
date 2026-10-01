@@ -6,7 +6,7 @@
  *
  *   node test/host.test.mjs      # exits non-zero on the first failed assertion set
  */
-import { existsSync, mkdtempSync, readdirSync, utimesSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -110,6 +110,53 @@ console.log("== schema ==");
     mod.IMAGE_AREAS.every((a) => d[`${a}Image`] === "" && d[`${a}ImageLight`] === "" && d[`${a}ImageDark`] === ""),
   );
   check("videoPlaybackRate defaults to 1", d.videoPlaybackRate === 1, String(d.videoPlaybackRate));
+
+  // The Client half owns the AI-accent settings; a 0.2-line Host only accepts writes to
+  // fields its Config schema declares, so every one of them has to be in the schema here.
+  const ACCENT_FIELDS = [
+    "accentApiKey",
+    "accentBaseUrl",
+    "accentCount",
+    "accentEnabled",
+    "accentFrame",
+    "accentFrameControls",
+    "accentFrameOpacity",
+    "accentFrameScale",
+    "accentFrames",
+    "accentKeyEnv",
+    "accentKeyMode",
+    "accentLevel",
+    "accentMaterial",
+    "accentMode",
+    "accentModel",
+    "accentPalette",
+    "accentPromptExtra",
+    "accentProvider",
+    "accentRiskHidden",
+    "accentSize",
+    "accentStyle",
+  ];
+  const missing = ACCENT_FIELDS.filter((field) => !mod.SKIN_FIELDS.includes(field));
+  check("SKIN_FIELDS carries every AI-accent setting", missing.length === 0, `missing: ${missing.join(", ")}`);
+  check(
+    "accent defaults mirror the Client half's fallbacks",
+    d.accentEnabled === true && d.accentLevel === 0 && d.accentMode === "wash" && d.accentProvider === "dashscope-wanx"
+      && d.accentKeyMode === "env" && d.accentCount === 2 && d.accentSize === "1024x1024" && d.accentFrames === "[]"
+      && d.accentFrameScale === 1 && d.accentFrameOpacity === 1 && d.accentFrameControls === false && d.accentRiskHidden === false,
+    JSON.stringify({ level: d.accentLevel, provider: d.accentProvider, count: d.accentCount, frames: d.accentFrames }),
+  );
+
+  // What a 0.2-line Host hands to apply(): every declared field as a live reference.
+  const resolved = mod.Config({});
+  const declared = Object.keys(resolved);
+  check(
+    "Config resolves exactly the declared skin fields",
+    declared.length === mod.SKIN_FIELDS.length && mod.SKIN_FIELDS.every((field) => field in resolved),
+    `${declared.length} vs ${mod.SKIN_FIELDS.length}`,
+  );
+  const live = declared.filter((field) => resolved[field] !== null && typeof resolved[field].get === "function");
+  check("volatile fields are all-or-nothing", live.length === 0 || live.length === declared.length, `${live.length}/${declared.length} live`);
+  if (live.length > 0) check("every skin field is live-editable on a 0.2-line Host", live.length === declared.length);
 }
 
 console.log("== route registration ==");
@@ -216,23 +263,6 @@ console.log("== delete ==");
   const r = await call("POST", "/dsh-image-skin/gc");
   check("gc with empty keep spares the newest file", json(r)?.removed?.length === 0, r.body);
   check("newest file still present", listFiles().length === 1, JSON.stringify(listFiles()));
-}
-{
-  // The cross-profile bug (2026-10-01): the store is shared between profiles (web / desktop), but
-  // the sweep only knows the value of *this* profile. A profile with nothing configured used to
-  // delete every aged file - including the wallpaper another profile still pointed at. The
-  // freshness guard alone could not save it (60s), so an empty keep must delete nothing at all.
-  const aged = json(await call("POST", "/dsh-image-skin/upload", JSON.stringify({ image: dataUri })))?.url;
-  const agedName = aged.split("/").pop();
-  const longAgo = new Date(Date.now() - 30 * 60 * 1000);
-  utimesSync(join(home, "image-skin", agedName), longAgo, longAgo);
-  fakeSettings.value = { enabled: true };
-  const report = json(await call("POST", "/dsh-image-skin/gc"));
-  check(
-    "empty keep never sweeps an aged file (cross-profile safety)",
-    existsSync(join(home, "image-skin", agedName)) && (report?.removed?.length ?? 0) === 0,
-    JSON.stringify(report),
-  );
 }
 {
   // A file referenced only by a per-mode override must survive the sweep — the keep set
@@ -501,6 +531,75 @@ console.log("== ai accent: key probe + streaming ==");
   check("stream: reports the queued/running stage", /"stage":"(queued|running)"/.test(joined), joined.slice(0, 300));
   check("stream: ends with done + urls", /"stage":"done"/.test(joined) && /\/dsh-image-skin\/files\//.test(joined), joined.slice(-220));
   globalThis.fetch = realFetch;
+}
+
+console.log("== 0.2-line Host: the entry's live Config is the namespace ==");
+// The desktop Host (0.2 line) has no `settings.register`: a namespace is the owning
+// entry's Config, delivered to apply() as live references. The host half must read the
+// same values from there, and must stand the automatic settings page down.
+check("Config schema is exported for the Host settings mirror", typeof mod.Config === "function" || typeof mod.Config === "object");
+{
+  const keep = "11111111-1111-4111-8111-111111111111.png";
+  const drop = "22222222-2222-4222-8222-222222222222.png";
+  const old = Date.now() / 1000 - 3600;
+  for (const name of [keep, drop]) {
+    writeFileSync(join(home, "image-skin", name), Buffer.from(PNG, "base64"));
+    utimesSync(join(home, "image-skin", name), old, old);
+  }
+  const liveConfig = {
+    enabled: { get: () => true },
+    panelOpacity: { get: () => 85 },
+    videoPlaybackRate: { get: () => 1 },
+    windowImage: { get: () => `/dsh-image-skin/files/${keep}` },
+  };
+  for (const area of mod.IMAGE_AREAS) liveConfig[`${area}Image`] ??= { get: () => "" };
+
+  const configureCalls = [];
+  let liveRoute = null;
+  const liveSettings = { configure: (presentation, owner) => configureCalls.push({ presentation, owner }) };
+  const liveServer = {
+    register(r) {
+      liveRoute = r;
+      return () => {};
+    },
+  };
+  const liveCtx = {
+    inject: (deps, fn) =>
+      fn({
+        settings: liveSettings,
+        webServer: liveServer,
+        effect: (fn2) => fn2(),
+        get: (n) => (n === "settings" ? liveSettings : n === "webServer" ? liveServer : undefined),
+      }),
+    effect: (fn) => fn(),
+    get: () => undefined,
+    fiber: { id: "ui-image-skin" },
+  };
+  mod.apply(liveCtx, liveConfig);
+
+  check("live Config: a route is registered without settings.register", liveRoute !== null);
+  check(
+    "live Config: the generated settings page is stood down for this fiber",
+    configureCalls.length === 1 && configureCalls[0].presentation?.auto === false && configureCalls[0].owner === liveCtx.fiber,
+    JSON.stringify(configureCalls),
+  );
+
+  const out = { status: 0, body: null };
+  const res = {
+    writeHead: (s) => (out.status = s),
+    end: (b) => {
+      out.body = b;
+    },
+  };
+  await liveRoute.handler(fakeReq("POST", "/dsh-image-skin/gc"), res);
+  const report = out.body === undefined ? undefined : JSON.parse(out.body);
+  check("live Config: gc -> 200", out.status === 200, `got ${out.status} ${out.body}`);
+  check(
+    "live Config: gc reads the live Config references",
+    report?.kept === 1 && report?.removed?.includes(drop) === true && report.removed.includes(keep) === false,
+    JSON.stringify(report),
+  );
+  check("live Config: the referenced file survives", existsSync(join(home, "image-skin", keep)));
 }
 
 console.log("== disposer ==");

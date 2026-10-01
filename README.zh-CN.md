@@ -6,8 +6,6 @@
 [![license](https://img.shields.io/npm/l/dsh-image-skin?color=black)](LICENSE)
 [![tests](https://github.com/Hwayn-pixel/dsh-image-skin/actions/workflows/test.yml/badge.svg)](https://github.com/Hwayn-pixel/dsh-image-skin/actions/workflows/test.yml)
 
-**npm：** [`dsh-image-skin`](https://www.npmjs.com/package/dsh-image-skin) · **一行装：** `dsh plugin --profile web add dsh-image-skin`
-
 上传你自己的**图片、GIF 和循环视频**，铺到 DeepSeek Harness 网页界面的几个大区域上；往侧栏和输入框贴**能拖能缩的角标**；用**从壁纸里取来的颜色**给整个界面上色；再调调面板透不透。
 **不用账号、不用上传、不走云端——所有东西都只存在你本机。**
 

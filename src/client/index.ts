@@ -17,7 +17,16 @@ const IMG_ALPHA_VAR = "--dsh-skin-img-opacity";
 /** Keep in step with MAX_UPLOAD_BYTES (32 MB base64 envelope) in the host half. */
 const MAX_UPLOAD_MB = 24;
 
-export const inject = ["slots", "settingsScope", "theme"];
+/**
+ * Settings transport, resolved at runtime because the two Host generations expose
+ * different faces:
+ *  - 0.1 line provides `settingsScope` (`bind({ namespace })` → durable namespace scope).
+ *  - 0.2 line (desktop) provides `configForms`, where a namespace *is* the owning plugin
+ *    entry's live Config (`get(entryId)` → { getSnapshot, subscribe, set, unset }).
+ * `inject` therefore names only the seats that exist in both worlds, and each face is
+ * attached through `ctx.inject` once its provider shows up.
+ */
+export const inject = ["slots", "theme"];
 
 type Mode = "light" | "dark";
 
@@ -45,10 +54,18 @@ interface Scope<T> {
   set(field: string, value: unknown): Promise<void>;
   unset(field: string): Promise<void>;
 }
+/** 0.2-line settings face: one namespace's live Config form. */
+interface ConfigFormFace {
+  getSnapshot(): { status?: string; value?: SkinValue };
+  subscribe(listener: () => void): () => void;
+  set(field: string, value: unknown): Promise<unknown>;
+  unset(field: string): Promise<unknown>;
+}
 interface ClientContext {
   effect(fn: () => (() => void) | void, label?: string): unknown;
   on?(event: string, listener: () => void): unknown;
-  settingsScope: { bind<T>(spec: { namespace: string }): Scope<T> };
+  inject?(services: readonly string[], fn: (ctx: ClientContext) => (() => void) | void): unknown;
+  get?(name: string): unknown;
   slots: {
     inject(slot: string, fn: () => unknown): unknown;
     register(options: Record<string, unknown>, component: unknown): unknown;
@@ -58,6 +75,86 @@ interface ClientContext {
 }
 
 type SkinValue = Record<string, unknown>;
+
+/** Present one 0.2-line config form through the {@link Scope} surface the skin code uses. */
+function adaptConfigForm(form: ConfigFormFace): Scope<SkinValue> {
+  return {
+    getSnapshot: () => {
+      const snapshot = form.getSnapshot();
+      const status = snapshot.status === "ready" || snapshot.status === "unavailable" ? snapshot.status : snapshot.value === undefined ? "loading" : "ready";
+      return { status, value: snapshot.value };
+    },
+    subscribe: (listener) => form.subscribe(listener),
+    set: (field, value) => Promise.resolve(form.set(field, value)).then(() => undefined),
+    unset: (field) => Promise.resolve(form.unset(field)).then(() => undefined),
+  };
+}
+
+/**
+ * Bind whichever settings face this Host provides and keep one {@link Scope} alive over it.
+ * The skin code never learns which generation it runs on: it subscribes before the face
+ * attaches and is notified both when it appears and on every later value change.
+ */
+export function createSettingsScope(ctx: ClientContext): Scope<SkinValue> {
+  const listeners = new Set<() => void>();
+  let provider: Scope<SkinValue> | null = null;
+  let snapshot: Snapshot<SkinValue> = { status: "loading", value: undefined };
+
+  const notify = () => {
+    for (const listener of [...listeners]) {
+      try {
+        listener();
+      } catch {
+        /* one listener must not break the others */
+      }
+    }
+  };
+  const bind = (scope: Scope<SkinValue>): (() => void) => {
+    provider = scope;
+    const sync = () => {
+      const next = scope.getSnapshot();
+      snapshot = { status: next.status ?? (next.value === undefined ? "loading" : "ready"), value: next.value };
+      notify();
+    };
+    sync();
+    const off = scope.subscribe(sync);
+    return () => {
+      off();
+      if (provider === scope) {
+        provider = null;
+        snapshot = { status: "loading", value: undefined };
+      }
+    };
+  };
+
+  const inject = ctx.inject?.bind(ctx);
+  if (inject === undefined) {
+    // A context without `inject` can still hand over an already attached service.
+    const forms = ctx.get?.("configForms") as { get(entryId: string): ConfigFormFace } | undefined;
+    const scopes = ctx.get?.("settingsScope") as { bind<T>(spec: { namespace: string }): Scope<T> } | undefined;
+    if (forms !== undefined) bind(adaptConfigForm(forms.get(NS)));
+    else if (scopes !== undefined) bind(scopes.bind<SkinValue>({ namespace: NS }));
+  } else {
+    inject(["configForms"], (child) => bind(adaptConfigForm((child as unknown as { configForms: { get(entryId: string): ConfigFormFace } }).configForms.get(NS))));
+    // `settingsScope` was removed in DSH 0.2: bind it only if the Host actually provides it.
+    // Declaring it in an `inject` made this whole plugin wait forever on the desktop
+    // ("pending (waiting for service: settingsScope)") - no error, but no skin either.
+    const legacyScopes = ctx.get?.("settingsScope") as { bind<T>(spec: { namespace: string }): Scope<T> } | undefined;
+    if (legacyScopes !== undefined) bind(legacyScopes.bind<SkinValue>({ namespace: NS }));
+  }
+
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    set: (field, value) => (provider === null ? Promise.reject(new Error("dsh-image-skin: settings are not ready")) : provider.set(field, value)),
+    unset: (field) => (provider === null ? Promise.reject(new Error("dsh-image-skin: settings are not ready")) : provider.unset(field)),
+  };
+}
 
 interface AreaDef {
   id: string;
@@ -3978,7 +4075,7 @@ export function apply(ctx: ClientContext): void {
   const generation = ++applyGeneration;
   ensureBaseStyles();
   document.body.setAttribute(BODY_ATTR, "");
-  const scope = ctx.settingsScope.bind<SkinValue>({ namespace: NS });
+  const scope = createSettingsScope(ctx);
   const modeStore = makeModeStore(ctx.theme);
   const section = createSection(scope, modeStore);
 

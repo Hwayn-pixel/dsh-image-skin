@@ -1,47 +1,45 @@
 # Changelog
 
-## 0.4.2
-
-### Fixed
-- **Saved images could disappear after a restart.** The store (`$DSH_HOME/image-skin/`) is shared
-  between profiles (the `web` one and the desktop app), but the sweep only knew the settings of the
-  profile that ran it. A profile with **no image configured** therefore deleted every aged file —
-  including a wallpaper that *another* profile still pointed at. An empty reference set now deletes
-  nothing at all; the 60-second freshness guard was never enough on its own.
-
-### 修复
-- **存到本机的图，重启后会消失。** 存储目录（`$DSH_HOME/image-skin/`）是各 profile（网页版 / 桌面端）
-  **共用**的，而清理只认"发起清理那个 profile"的配置。于是**一张图都没配**的那个 profile 会把所有"够老"的
-  文件全删——包括**另一个 profile 还在引用**的那张壁纸。现在：**引用集为空就一个都不删**；
-  那道 60 秒的"太新不判"保护本来就不够。
-
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
 > Each version starts with a Chinese summary, followed by the detailed English entries.
 
-## 0.4.1 — 2026-09-27
+## 0.4.2 — 2026-09-30
 
-### 白块消失：卡片部件 & 「让位」控件都收敛成单色
+### 另外：存到本机的图“过一晚就没了”（同版修复）
 
-- **「Agent 预设」页里，标题 / 描述 / 代码行底下垫着一层浅色板**，看着像“文字 P 上去的”。
-  根因是选择器 `[class*="_card"]` 太贪：它本意是管“卡片容器”，却把 DSH 的**卡片部件**
-  （`_cardHead` / `_cardName` / `_cardDesc` / `_cardFoot` / `_cardId`）也一并命中，于是给文字底下
-  垫了一层面板色。改为只匹配**整张卡片**（类名以 `_card` 结尾，或 `_card` 后面还跟着另一个类）。
-- **「让位」（画面太忙时装饰退让）在浅色下拿白色打底** → 周围是染色玻璃，它反而更白，
-  就成了一堆刺眼的白按钮。改为退进**我们自己的色系**（面板同色、更低透明度），变成单色、安静的一档。
-- 影响面：设置弹窗的权限 / 语言 / 外观 / 各项下拉、会话列表的「展开其余会话」、欢迎页的「预览版」等——一并收敛。
+- **症状**：保存到本机的图片，重启后消失（重启前还好好的）。
+- **根因**：存储目录 `$DSH_HOME/image-skin/` 是**所有 profile 共用**的，而清理只认“发起清理那个 profile”
+  的配置——没配图的 profile 一清理，就把**别人还在引用**的图全删了；唯一的安全网是“60 秒内太新的不判”。
+- **修法**：**引用集为空 → 一个都不删**；并补了一条回归测试（跨 profile 安全）。
 
-### Cards and "yielding" controls stop painting white blocks
+### 桌面端适配：DSH 0.2 的 settings 契约变了
 
-- On the **Agent presets** page the title / description / code line sat on a pale slab ("text pasted on").
-  The selector `[class*="_card"]` was too greedy: it meant "card containers" but also matched DSH's
-  **card parts** (`_cardHead`, `_cardName`, `_cardDesc`, `_cardFoot`, `_cardId`). It now matches only
-  whole cards — a class ending in `_card`, or `_card` followed by another class.
-- The "yield" rule (decoration steps back where the picture is busy) used a **white** wash in light
-  mode, which sat *brighter* than the tinted glass around it and read as a glaring block. It now
-  steps back inside our own colour family — the panel's tone at a lower alpha — so a quiet control
-  stays monochrome.
-- Affects the settings dialog (permission / language / appearance rows and their dropdowns), the
-  session list's "show more" row and the welcome card's "preview" chip.
+- **症状**：在桌面版（DSH 0.2 / Electron）里插件"装了但没反应"——设置里没有「图片皮肤」这一页，
+  皮肤也不生效；但 `dsh web`（0.1 系）里一切正常。宿主半侧的图片路由其实是好的
+  （`GET /dsh-image-skin/providers` 返回 200），坏的只有客户端半侧。
+- **根因（两处契约变更）**：
+  1. 客户端：0.1 的 `settingsScope` 客户端服务在 0.2 里没有了，取而代之的是 `configForms`
+     （一个命名空间 = 拥有它的那个宿主插件条目的 live Config）。插件把它写进 `inject`，
+     cordis 找不到该服务就**永远不激活**——没有报错，只是静默什么都不做。
+  2. 宿主：0.2 的 `settings` 服务**没有 `register(ns, schema)`**；命名空间来自插件自己导出的
+     `Config` 模式，而且只有标了 `.volatile()` 的字段才会进入设置镜像。
+- **修法（两代宿主同时可用）**：
+  - 宿主：导出 `Config`，每个字段在 schemastery 支持时加 `.volatile()`；值优先从 live Config 读，
+    读不到再回退 `settings.get(ns)`；在 0.2 上调 `settings.configure({ auto: false })` 让自动页面让位，
+    因为插件自带「图片皮肤」页。
+  - 客户端：`inject` 只声明两代都有的 `slots` + `theme`，设置通道用 `ctx.inject` 运行时绑定——
+    有 `configForms` 用 `configForms.get("ui-image-skin")`，没有就退回 `settingsScope.bind(...)`，
+    对上层暴露同一个 `Scope`（getSnapshot / subscribe / set / unset）。
+- 测试：宿主新增"0.2 系 live Config"用例（含 `/gc` 用 live Config 判断引用），客户端新增两代 settings
+  通道 + 无通道时的用例。
+- 注意：桌面端皮肤值改存在 profile 的 `cordis.patch.yml`（该条目的 `config`）里，这是 0.2 的原生做法；
+  0.1 的 `settings.yaml` 命名空间保持不变。
+- **追加修复：染色深度滑块在桌面端拖不动**。0.2 的宿主只接受"自己的 Config 里声明过"的设置写入：
+  `SettingsForms.write()` 把未声明的字段判为 `Config field "…" is not volatile` 并**静默失败**（表单自己回滚），
+  所以滑块看着是"用不了"。AI 纹样那一整组 `accent*` 字段（染色深度/路线/服务商/Key/生成张数/已应用生成图
+  ……共 21 个）原本只存在于浏览器半侧，宿主 schema 里没有。现在这 21 个字段全部进宿主 schema（默认值与
+  浏览器半侧的 `?? 回退值` 一一对应），并加了两条回归测试：宿主侧断言字段齐备且可写；客户端侧正则扫
+  `lib/client.js`，任何"浏览器半侧碰了、宿主没声明"的字段都直接挂测试。
 
 ## 0.4.0 — 2026-09-25
 
