@@ -7,6 +7,22 @@
 [![tests](https://github.com/Hwayn-pixel/dsh-image-skin/actions/workflows/test.yml/badge.svg)](https://github.com/Hwayn-pixel/dsh-image-skin/actions/workflows/test.yml)
 [![DSH](https://img.shields.io/badge/DSH-0.1.5--rc.1-6b46c1)](#compatibility)
 
+**npm:** [`dsh-image-skin`](https://www.npmjs.com/package/dsh-image-skin) · **one-line install:** `dsh plugin --profile web add dsh-image-skin`
+
+> ⚠️ **Desktop app (Electron) users — read this first.** Versions **≤ 0.4.1** declare the client service
+> `settingsScope`, which DSH **0.2 removed**. DSH 0.2 treats a client entry that never activates as a
+> **fatal boot error**, so the desktop app refuses to start:
+> `web boot: 1 entry did not activate — dsh-image-skin: pending (waiting for service: settingsScope)`.
+> **0.4.2 and newer are fine.** If your installer only offers 0.4.1, that is the package manager's
+> *minimum release age* policy holding back the newer versions — either install with `npm`
+> (`npm i dsh-image-skin@latest`), or add this to the DSH profile's `pnpm-workspace.yaml`:
+> ```yaml
+> minimumReleaseAgeExclude:
+>   - dsh-image-skin@0.4.6
+> ```
+> then restart the app. (The app's own **“禁用第三方插件… / disable third-party plugins”** recovery
+> button also gets you back in.)
+
 Drop your own **images, GIFs and looping video** onto the big regions of the DeepSeek Harness web
 UI, stick **draggable stickers** on the sidebar and composer, tint the whole interface with
 **colours pulled from your wallpaper**, and decide how much the panels let through.

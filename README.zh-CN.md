@@ -1,5 +1,16 @@
 # dsh-image-skin
 
+> ⚠️ **桌面版（Electron 应用）必读。** **≤ 0.4.1** 的版本声明了客户端服务 `settingsScope`，而 DSH **0.2 把它去掉了**。
+> DSH 0.2 把"永远不激活的客户端条目"当成**致命错误**，于是桌面版会直接拒绝启动：
+> `web boot: 1 entry did not activate — dsh-image-skin: pending (waiting for service: settingsScope)`。
+> **0.4.2 及以后没有问题。** 如果你的安装器只给 0.4.1，那是包管理器的 *minimum release age* 策略把新版拦住了：
+> 换成用 `npm` 装（`npm i dsh-image-skin@latest`），或在 DSH profile 的 `pnpm-workspace.yaml` 里加：
+> ```yaml
+> minimumReleaseAgeExclude:
+>   - dsh-image-skin@0.4.6
+> ```
+> 然后重启应用。（应用自己的 **「禁用第三方插件…」** 按钮也能先把你救进去。）
+
 ### 给你的 DSH 网页界面，换上一副**属于你自己**的样子。
 
 [![npm](https://img.shields.io/npm/v/dsh-image-skin?color=4c8bf5)](https://www.npmjs.com/package/dsh-image-skin)
