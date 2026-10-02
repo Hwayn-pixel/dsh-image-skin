@@ -607,6 +607,26 @@ check("effect kept the route disposer", typeof capturedDisposer === "function");
 capturedDisposer?.();
 check("disposing removes the route", routeDisposed === true);
 
+console.log("== packaging ==");
+// `.npmignore` does NOT filter inside a `files` whitelist, so a stray editor backup sitting in the
+// tree gets packed no matter what the ignore files say. That shipped twice (0.4.6, 0.4.10). Keep
+// junk out of the tree - and keep this test to say so.
+const PACKED_DIRS = ["src", "lib", "scripts", "test"];
+const BANNED_NAME = /\.bak|\.orig$|\.rej$|\.swp$|\.tmp$/i;
+const offenders = [];
+const walkPacked = (dir) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) walkPacked(p);
+    else if (BANNED_NAME.test(entry.name)) offenders.push(p);
+  }
+};
+for (const d of PACKED_DIRS) {
+  const abs = fileURLToPath(new URL(`../${d}`, import.meta.url));
+  if (existsSync(abs)) walkPacked(abs);
+}
+check("no editor backups or temp files in the packed dirs", offenders.length === 0, offenders.join(", "));
+
 console.log(`\nfiles left in skin dir: ${listFiles().length}`);
 console.log(`RESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
