@@ -3,6 +3,17 @@
 > 每个版本号下方先给中文摘要，随后是详细英文条目。
 > Each version starts with a Chinese summary, followed by the detailed English entries.
 
+## 0.4.11 — 2026-10-02
+
+### 补上 `dsh-plugin` 关键词（为了被“插件商店”收录）
+
+- 社区那些“插件商店”（deeplugin.store / dsh.market / dsh-ai.org / dsh-plugin-store …）**都不是官方的**，
+  而是自动收录的目录；货源大体是三样：GitHub 的 **`dsh-plugin` 话题**、**npm 关键词**、
+  以及 `awesome-dsh-plugin` 这类精选列表。
+- 我们的仓库话题早就挂了 ✓，但 **npm 包的 `keywords` 里一直没有 `dsh-plugin`** ✗ ——
+  凡是扫 npm 关键词的目录就抓不到我们。
+- 这一版只改了这一行（外加版本号）：`keywords` 现在以 `dsh-plugin` 打头。
+
 ## 0.4.10 — 2026-10-02
 
 ### 打包卫生：`.npmignore` 在 `files` 白名单里根本不生效
