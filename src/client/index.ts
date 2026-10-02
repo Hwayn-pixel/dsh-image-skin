@@ -696,6 +696,37 @@ function videoLayer(): HTMLVideoElement {
   return v;
 }
 
+/**
+ * A wallpaper video is decoration. When the tab is not visible there is nothing to decorate, and a
+ * looping backdrop is the difference between a cool laptop and one with a fan spinning up in a
+ * bag. Pause everything we put on screen while the page is hidden, and pick it back up when it
+ * returns. No setting for this: it is not a preference, it is manners.
+ */
+let visibilityGuardInstalled = false;
+function installVisibilityGuard(): void {
+  if (visibilityGuardInstalled || typeof document === "undefined") return;
+  visibilityGuardInstalled = true;
+  const owned = (): HTMLVideoElement[] =>
+    Array.from(
+      document.querySelectorAll<HTMLVideoElement>(
+        `#${VIDEO_LAYER_ID}, [data-dsh-skin-sticker] video`,
+      ),
+    );
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      for (const v of owned()) {
+        try {
+          v.pause();
+        } catch {
+          /* a video that will not pause is not worth a crash */
+        }
+      }
+      return;
+    }
+    for (const v of owned()) void v.play()?.catch(() => {});
+  });
+}
+
 function clearWindowImage(): void {
   const body = document.body;
   body.style.removeProperty("background-image");
@@ -3783,37 +3814,18 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
     );
 
 
-    // ── two levels ────────────────────────────────────────────────────────────
-    // Level one is a choice, level two is a workbench. They live on separate screens because the
-    // image editor and the ornament workbench answer different questions - and because the AI
-    // half has nothing to do until a wallpaper exists to sample colours from.
+    // ── two screens ───────────────────────────────────────────────────────────
+    // Screen one is a choice, screen two is a workbench. They live apart because the image editor
+    // and the colour screen answer different questions - and because the colour screen has nothing
+    // to do until a wallpaper exists to sample its palette from.
     const hasWallpaper = windowHasArtwork(v);
-    const [page, setPage] = React.useState<"home" | "images" | "ai">("home");
-    const [riskOpen, setRiskOpen] = React.useState(false);
+    const [page, setPage] = React.useState<"home" | "images" | "colour">("home");
 
-    // Entering the AI screen raises the notice unless it has been silenced. Losing the wallpaper
-    // drops you back to the choice screen, so the locked entry never lies about being usable.
+    // Losing the wallpaper drops you back to the choice screen, so the locked entry never lies
+    // about being usable.
     React.useEffect(() => {
-      if (page !== "ai") {
-        setRiskOpen(false);
-        return;
-      }
-      if (!hasWallpaper) {
-        setPage("home");
-        return;
-      }
-      if (v.accentRiskHidden !== true) setRiskOpen(true);
-    }, [page, hasWallpaper, v.accentRiskHidden]);
-
-    // The notice is a dialog, so Escape has to close it like one.
-    React.useEffect(() => {
-      if (!riskOpen) return;
-      const onKey = (e: KeyboardEvent) => {
-        if (e.key === "Escape") setRiskOpen(false);
-      };
-      window.addEventListener("keydown", onKey);
-      return () => window.removeEventListener("keydown", onKey);
-    }, [riskOpen]);
+      if (page === "colour" && !hasWallpaper) setPage("home");
+    }, [page, hasWallpaper]);
 
     // How much is set up, in the currency the user thinks in: areas.
     const configuredAreas = AREAS.filter((a) =>
@@ -3839,10 +3851,10 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       neon: "霓虹 / 高饱和",
       plain: "（未识别）",
     };
-    const aiStatus =
+    const colourStatus =
       v.accentEnabled === false
-        ? "装饰未开启"
-        : `档位 ${accentIndex} · ${ACCENT_LEVELS[accentIndex]?.name ?? "取色"}${v.accentFrame ? " · 已应用生成图" : ""}`;
+        ? "配色未开启"
+        : `档位 ${accentIndex} · ${ACCENT_LEVELS[accentIndex]?.name ?? "取色"}`;
 
     const back = (title: string) =>
       h(
@@ -3853,7 +3865,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       );
 
     const entry = (
-      target: "images" | "ai",
+      target: "images" | "colour",
       title: string,
       sub: string,
       status: string,
@@ -3883,67 +3895,13 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
         locked && lockedHint ? h("span", { className: "dshImgSkin-lock" }, lockedHint) : null,
       );
 
-    // Shown before anything is generated, every time you come in, until "不再显示" is ticked.
-    // Clicking the dim area closes it like a dialog should: a backdrop that swallows clicks with no
-    // way out reads as "the UI is broken", which is exactly how it was reported.
-    const riskModal = h(
-      "div",
-      {
-        className: "dshImgSkin-modal",
-        role: "dialog",
-        "aria-modal": "true",
-        onClick: (e: any) => {
-          if (e.target === e.currentTarget) setRiskOpen(false);
-        },
-      },
-      h(
-        "div",
-        {
-          className: "dshImgSkin-modalCard",
-          style: { background: mode === "dark" ? "#26262b" : "#ffffff" },
-        },
-        h("span", { className: "dshImgSkin-modalTitle" }, "用 AI 纹样之前，先看这五条"),
-        h(
-          "ul",
-          { className: "dshImgSkin-modalList" },
-          h("li", null, "点「生成」时，提示词和壁纸配色会发给你选的第三方生图服务——这部分内容会离开本机。"),
-          h("li", null, "每生成一张，都会按你在那家服务的价格计费；张数和尺寸影响花费。"),
-          h("li", null, "画成什么样由模型决定，不保证一次满意，可能要试几张才挑到合适的。"),
-          h("li", null, "API Key 只存在本机（或读环境变量，界面里只读），不会发给除你选定服务之外的任何地方。"),
-          h("li", null, "取色和配色完全在本机算：不联网、不花钱、不需要 key。"),
-        ),
-        h(
-          "div",
-          { className: "dshImgSkin-modalActions" },
-          h(
-            "button",
-            { className: "dshImgSkin-btn", type: "button", "data-variant": "primary", onClick: () => setRiskOpen(false) },
-            "我明白了",
-          ),
-          h(
-            "button",
-            {
-              className: "dshImgSkin-modalDismiss",
-              type: "button",
-              onClick: () => {
-                apply("accentRiskHidden", true);
-                setRiskOpen(false);
-              },
-            },
-            "不再显示",
-          ),
-          h("span", { className: "dshImgSkin-hint" }, "点背景或按 Esc 也能关掉"),
-        ),
-      ),
-    );
-
     const home = h(
       "div",
       { className: "dshImgSkin-shell", "data-dsh-skin-chrome": "settings" },
       h(
         "p",
         { className: "dshImgSkin-intro" },
-        "分两步走：先在「贴图」里放上自己的画面，再决定要不要用「AI 纹样」给按钮和弹窗加装饰。图片只存在本机，不会上传。",
+        "两块可以分开用：先在「贴图」里放上自己的画面，再决定要不要让界面「跟着画面配色」。图片只存在本机，不会上传。",
       ),
       h(
         "div",
@@ -3956,15 +3914,66 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           false,
         ),
         entry(
-          "ai",
-          "AI 纹样",
-          "给按钮和弹窗加装饰框：档位 0 本机取色，1–4 由生图模型画。",
-          aiStatus,
+          "colour",
+          "配色",
+          "把画面里的颜色染到按钮、输入框和弹窗上；档位只决定深浅，不改变画什么。",
+          colourStatus,
           !hasWallpaper,
-          "先给「窗口」放一张贴图才能进——AI 要参考它的配色。",
+          "先给「窗口」放一张贴图才能进——颜色要从那张图里取。",
         ),
       ),
       notice ? h("p", { className: "dshImgSkin-banner" }, notice) : null,
+    );
+
+    /**
+     * Seed the other mode from this one — filling only the slots that are still empty.
+     * Setting up eight regions twice is the tedious part of this plugin; this turns the second pass
+     * into a few tweaks instead of a repeat. It only ever *adds*: a slot you already filled is left
+     * alone, so nothing you configured can be overwritten (and nothing gets garbage-collected
+     * behind your back).
+     */
+    const otherMode: Mode = mode === "dark" ? "light" : "dark";
+    const mySuffix = mode === "dark" ? "Dark" : "Light";
+    const otherSuffix = otherMode === "dark" ? "Dark" : "Light";
+    const fillable = AREAS.filter((a) => {
+      const mine = String(v[`${a.id}Image${mySuffix}`] ?? "").trim();
+      const theirs = String(v[`${a.id}Image${otherSuffix}`] ?? "").trim();
+      return mine.length > 0 && theirs.length === 0;
+    });
+    const seedRow = h(
+      "div",
+      { className: "dshImgSkin-row" },
+      h(
+        "div",
+        { className: "dshImgSkin-head" },
+        h(
+          "div",
+          null,
+          h("span", { className: "dshImgSkin-title" }, "补齐另一个模式"),
+          h(
+            "small",
+            { className: "dshImgSkin-hint" },
+            fillable.length
+              ? `把「${modeLabel(mode)}」这套复制给「${modeLabel(otherMode)}」——只填还没配的 ${fillable.length} 个区域，已经配好的不动。`
+              : `「${modeLabel(otherMode)}」已经没有空缺了。`,
+          ),
+        ),
+        h(
+          "button",
+          {
+            className: "dshImgSkin-btn",
+            type: "button",
+            disabled: fillable.length === 0,
+            onClick: () => {
+              for (const a of fillable) {
+                const from = String(v[`${a.id}Image${mySuffix}`] ?? "").trim();
+                if (from) apply(`${a.id}Image${otherSuffix}`, from);
+              }
+            },
+          },
+          "补齐",
+        ),
+      ),
     );
 
     const imagesPage = h(
@@ -4007,6 +4016,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           ),
           modeSeg,
         ),
+        seedRow,
       ),
       areaGroup("界面区域", "整窗口的底图与各块面板的背景。", regionAreas),
       areaGroup("角标贴图", "贴在侧栏 / 输入框上，可拖动、可缩放。", stickerAreas),
@@ -4090,10 +4100,10 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       ),
     );
 
-    const aiPage = h(
+    const colourPage = h(
       "div",
       { className: "dshImgSkin-shell", "data-dsh-skin-chrome": "settings" },
-      back("AI 纹样"),
+      back("配色"),
       h(
         "p",
         { className: "dshImgSkin-intro" },
@@ -4167,12 +4177,10 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
             )
           : null,
       ),
-      // 纹饰（面板花框）那条路暂时留在 git 里（e19c633 / 34c3002 / b66006e），不再在这页挂一张
-      // "已下线"的空卡片了——实测它"看着吓人"，而这条路的价值还没定；这一页现在只做配色。
-      riskOpen ? riskModal : null,
+      // 这一页只做配色。（生成花纹那条路已下线，代码留在 git：e19c633 / 34c3002 / b66006e。）
     );
 
-    return page === "home" ? home : page === "images" ? imagesPage : aiPage;
+    return page === "home" ? home : page === "images" ? imagesPage : colourPage;
   };
 }
 
@@ -4211,6 +4219,7 @@ function disposeSkinDom(): void {
 export function apply(ctx: ClientContext): void {
   const generation = ++applyGeneration;
   ensureBaseStyles();
+  installVisibilityGuard();
   document.body.setAttribute(BODY_ATTR, "");
   const scope = createSettingsScope(ctx);
   const modeStore = makeModeStore(ctx.theme);

@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>图片皮肤 · dsh-image-skin</title>
+<meta name="description" content="给你的 DSH 网页版铺上自己的图片、GIF 和视频，让界面跟着壁纸一起配色。纯本机、可撤销。" />
+<meta property="og:title" content="图片皮肤 · dsh-image-skin" />
+<meta property="og:description" content="把 DSH 的界面变成你自己的样子 —— 贴图、角标、跟着画面配色。" />
+<meta property="og:image" content="shots/ui-nebula-light.jpg" />
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖼️</text></svg>" />
+<style>
+  :root{
+    --bg:#0b0c10; --bg2:#12141b; --card:#171a22; --line:#262a35;
+    --ink:#eef1f7; --mut:#9aa3b5; --dim:#6b7385;
+    --accent:#7aa2ff; --accent2:#ff8ac2;
+    --radius:16px; --maxw:1080px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:
+      radial-gradient(1100px 600px at 12% -10%, #1d2440 0%, transparent 60%),
+      radial-gradient(900px 500px at 95% 0%, #3a1c33 0%, transparent 55%),
+      var(--bg);
+    color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:0 22px}
+  header{padding:26px 0 0}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:14px;color:var(--mut)}
+  .brand{display:flex;align-items:center;gap:10px;color:var(--ink);font-weight:650;letter-spacing:.2px}
+  .brand .dot{width:10px;height:10px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent2))}
+  .topbar nav a{color:var(--mut);margin-left:16px}
+  .topbar nav a:hover{color:var(--ink)}
+  .hero{padding:64px 0 40px}
+  .kicker{color:var(--accent);font-size:13px;letter-spacing:.16em;text-transform:uppercase;font-weight:600}
+  h1{font-size:clamp(38px,6.2vw,68px);line-height:1.06;margin:14px 0 14px;font-weight:800;letter-spacing:-.02em}
+  h1 .grad{background:linear-gradient(100deg,#a9c2ff,#ffa9d4 60%,#ffd6a9);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lede{font-size:clamp(17px,2.2vw,21px);color:#c8d0e0;max-width:62ch;margin:0 0 8px}
+  .lede .zh{display:block;color:var(--mut);font-size:16px;margin-top:10px}
+  .cta{display:flex;flex-wrap:wrap;gap:12px;margin:30px 0 8px}
+  .btn{display:inline-flex;align-items:center;gap:9px;padding:11px 18px;border-radius:12px;border:1px solid var(--line);
+       background:var(--card);color:var(--ink);font-size:14.5px;font-weight:600;cursor:pointer;transition:.18s}
+  .btn:hover{border-color:#3a4056;transform:translateY(-1px)}
+  .btn.primary{background:linear-gradient(135deg,#6f8dff,#b06cff);border-color:transparent;color:#fff}
+  .btn code{background:transparent;color:inherit;padding:0;font-size:13.5px}
+  .shot{margin:34px 0 6px;border-radius:20px;overflow:hidden;border:1px solid var(--line);background:var(--card);
+        box-shadow:0 30px 70px -30px rgba(0,0,0,.9)}
+  .shot img{display:block;width:100%;height:auto}
+  .cap{color:var(--dim);font-size:13px;margin:10px 4px 0}
+  section{padding:52px 0;border-top:1px solid #1d212b;margin-top:36px}
+  h2{font-size:clamp(23px,3vw,30px);margin:0 0 6px;letter-spacing:-.01em}
+  h2 .sub{display:block;font-size:14px;color:var(--dim);font-weight:400;margin-top:6px;letter-spacing:0}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:16px;margin-top:26px}
+  .card{background:linear-gradient(180deg,var(--card),#14171e);border:1px solid var(--line);border-radius:var(--radius);padding:20px 20px 18px}
+  .card .ico{font-size:22px}
+  .card h3{margin:10px 0 6px;font-size:16.5px;font-weight:680}
+  .card p{margin:0;color:var(--mut);font-size:14.3px}
+  .two{display:grid;grid-template-columns:1.05fr .95fr;gap:26px;align-items:center;margin-top:26px}
+  @media(max-width:820px){.two{grid-template-columns:1fr}}
+  .two .shot{margin:0}
+  ul.clean{list-style:none;padding:0;margin:14px 0 0}
+  ul.clean li{position:relative;padding-left:22px;margin:9px 0;color:#cdd5e4;font-size:14.6px}
+  ul.clean li::before{content:"";position:absolute;left:2px;top:.62em;width:8px;height:8px;border-radius:50%;
+                      background:linear-gradient(135deg,var(--accent),var(--accent2))}
+  ul.clean li b{color:var(--ink);font-weight:650}
+  pre{background:#0e1015;border:1px solid var(--line);border-radius:12px;padding:16px 18px;overflow:auto;
+      font:13.2px/1.65 ui-monospace,SFMono-Regular,Consolas,"Liberation Mono",monospace;color:#cfe0ff}
+  .warn{background:#241a12;border:1px solid #4a3520;border-radius:12px;padding:16px 18px;color:#f2d9bd;font-size:14px}
+  .warn b{color:#ffd9a8}
+  .routes{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin-top:22px}
+  .route{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .route .n{font-weight:680;font-size:15px}
+  .route .d{color:var(--mut);font-size:13.6px;margin-top:6px}
+  .swatch{display:inline-block;width:14px;height:14px;border-radius:4px;margin-right:5px;vertical-align:-2px;border:1px solid #0006}
+  footer{border-top:1px solid #1d212b;margin-top:44px;padding:34px 0 60px;color:var(--dim);font-size:13.6px}
+  footer .row{display:flex;flex-wrap:wrap;gap:18px;justify-content:space-between}
+  .badges{display:flex;flex-wrap:wrap;gap:8px;margin-top:11px}
+  .badges img{height:20px}
+  .pill{display:inline-block;padding:3px 10px;border:1px solid var(--line);border-radius:999px;font-size:12.5px;color:var(--mut);background:#141821}
+  code.inl{background:#1c2029;border:1px solid var(--line);border-radius:6px;padding:1.5px 6px;font-size:13px;color:#cfe0ff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="topbar">
+      <div class="brand"><span class="dot"></span> dsh-image-skin · 图片皮肤</div>
+      <nav>
+        <a href="https://github.com/Hwayn-pixel/dsh-image-skin">GitHub</a>
+        <a href="https://www.npmjs.com/package/dsh-image-skin">npm</a>
+        <a href="https://github.com/Hwayn-pixel/dsh-image-skin/blob/main/README.zh-CN.md">中文文档</a>
+      </nav>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="kicker">DeepSeek Harness · web UI plugin</div>
+    <h1>把界面变成<br /><span class="grad">你自己的样子</span></h1>
+    <p class="lede">
+      An image skin for the DSH web UI — your own images, GIFs and looping video on every region,
+      draggable stickers on the chrome, and an interface that takes its colour from your wallpaper.
+      <span class="zh">给 DSH 网页版换上你自己的图片、GIF 和循环视频；界面的颜色从壁纸里取。<br />不要账号、不上传、不联网 —— <b>所有东西都留在你这台机器上</b>。</span>
+    </p>
+    <div class="cta">
+      <button class="btn primary" id="copyBtn"><span>复制安装命令</span></button>
+      <a class="btn" href="https://github.com/Hwayn-pixel/dsh-image-skin">看源码</a>
+      <a class="btn" href="https://www.npmjs.com/package/dsh-image-skin">npm</a>
+    </div>
+    <div class="badges">
+      <a href="https://www.npmjs.com/package/dsh-image-skin"><img src="https://img.shields.io/npm/v/dsh-image-skin?color=4c8bf5" alt="npm version" /></a>
+      <a href="https://github.com/Hwayn-pixel/dsh-image-skin/blob/main/LICENSE"><img src="https://img.shields.io/npm/l/dsh-image-skin?color=black" alt="license" /></a>
+      <span class="pill">MIT</span><span class="pill">纯本机</span><span class="pill">可完全撤销</span>
+    </div>
+
+    <div class="shot"><img src="shots/ui-nebula-light.jpg" alt="DSH 网页版铺在粉色星云壁纸上：磨砂面板与控件被染成画面的颜色" /></div>
+    <p class="cap">实机截图：壁纸铺在磨砂面板后面，界面的颜色是从这张图里取的。图、色板、角标，全在本机。</p>
+  </div>
+
+  <section>
+    <h2>它做什么<span class="sub">Eight regions, two stickers, one hue — all yours.</span></h2>
+    <div class="grid">
+      <div class="card"><div class="ico">🖼️</div><h3>按区域贴图</h3><p>整窗口底图、中心列、侧栏、欢迎页、右面板、输入框 —— 各自独立配图、填充方式与开关。</p></div>
+      <div class="card"><div class="ico">🎬</div><h3>动起来</h3><p>窗口底图支持循环 <code class="inl">mp4</code> / <code class="inl">webm</code>，任何区域都能用 GIF，一个滑块统管播放速率。</p></div>
+      <div class="card"><div class="ico">🌗</div><h3>浅色 / 深色分开配</h3><p>两套独立的图；切主题时壁纸跟着换，没单独配的区域回退到「通用图」。</p></div>
+      <div class="card"><div class="ico">🧸</div><h3>角标贴图</h3><p>侧栏与输入框上各一张自由漂浮的图 —— 拖动挪位置、拖角缩放，位置会记住。</p></div>
+      <div class="card"><div class="ico">🫧</div><h3>面板透明度</h3><p>一个滑块让 DSH 自己的面板透出背景 —— 而壁纸本身<strong>不会被压暗</strong>（刻意如此）。</p></div>
+      <div class="card"><div class="ico">🎨</div><h3>界面跟着画面配色</h3><p>按钮、输入框、弹窗、轨道不再是灰的：从壁纸取一个色相（视频也能取真帧），逐级对比度校验后染上去。</p></div>
+      <div class="card"><div class="ico">🪶</div><h3>流畅，且能一直流畅</h3><p>长对话、大 DOM 也不卡：过渡只走合成器能处理的属性，树太重时停掉文字颜色的活儿。</p></div>
+      <div class="card"><div class="ico">🔒</div><h3>纯本机、可撤销</h3><p>文件放在 <code class="inl">$DSH_HOME/image-skin/</code>。关掉插件，它加过的样式、角标、视频层全部消失。</p></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>配色：一个色相，长出整套界面<span class="sub">Sample a picture, tint the skeleton.</span></h2>
+    <div class="two">
+      <div>
+        <p style="color:var(--mut);margin-top:0">取色器把画面收敛成<strong>一个色相</strong>，每个角色（细线 / 文字 / 面）都由它推出来并做对比度校验，
+        所以界面是<strong>和画面和声</strong>，不是打架。深浅档位<strong>无级可调</strong>，拖动时界面立刻跟着变。</p>
+        <div class="routes">
+          <div class="route"><div class="n"><span class="swatch" style="background:#7aa2ff"></span>整屏染色</div><div class="d">每个面都带色，描边到处都有 —— 像被泡在颜色里。</div></div>
+          <div class="route"><div class="n"><span class="swatch" style="background:#8a93a8"></span>只染三处</div><div class="d">面保持中性，只有选中项 / 焦点框 / 一条分隔线有色。</div></div>
+          <div class="route"><div class="n"><span class="swatch" style="background:#ff8ac2"></span>双声部</div><div class="d">面借主色，交互色用画面里的第二个色相。</div></div>
+        </div>
+      </div>
+      <div class="shot" style="margin:0"><img src="shots/ui-fjord-light.jpg" alt="同一个界面换一张蓝色峡湾壁纸：面板与配色跟着新图重算" /></div>
+    </div>
+    <p class="cap">同一个界面，换一张壁纸 —— 面板、细线、文字色全部从新图重算。</p>
+  </section>
+
+  <section>
+    <h2>安装<span class="sub">One package, three steps.</span></h2>
+    <pre># 1. 从 npm 装
+dsh plugin --profile web add dsh-image-skin
+
+# 2. 重启 web 宿主，让 profile 重新组装
+dsh --profile web --no-open
+
+# 3. 浏览器硬刷新（Ctrl+F5）</pre>
+    <p style="color:var(--mut);font-size:14.3px">仓库里带了个小工具帮你做第 1–2 步：<code class="inl">node scripts/install.mjs --profile web</code>（加 <code class="inl">--dry-run</code> 只打印它要跑的命令）。</p>
+    <div class="warn" style="margin-top:18px">
+      <b>桌面端（Electron）用户：</b> ≤ 0.4.1 声明了 DSH 0.2 已删除的客户端服务 <code class="inl">settingsScope</code>，
+      会让桌面端<strong>直接起不来</strong>。0.4.2 及以后都正常。如果安装器一直给你旧版本，请<strong>点名要版本</strong>：<br />
+      <code class="inl">dsh plugin --profile web add dsh-image-skin@0.4.8</code> —— 在桌面端的插件安装框里也一样。
+    </div>
+  </section>
+
+  <section>
+    <h2>一点诚实的话<span class="sub">维护者的自白</span></h2>
+    <ul class="clean">
+      <li><b>这是个学生业余项目。</b>作者在课业缝里做它，回复和修复可能慢 —— 请多包涵。</li>
+      <li><b>issue、点子和 PR 都是真心欢迎的</b>，每一条都会看。</li>
+      <li><b>不许诺什么。</b>没有账号体系、没有云、没有遥测；关掉插件等于什么都没发生。</li>
+      <li><b>一个曾经试过、现在没有的功能：</b>让生图模型画一圈花纹边框（AI 纹样）。做实了、也公开过，
+          最后判断效果不好（花纹在小按钮上会变成色块打架），入口已撤。这一版只做<strong>取色与配色</strong>。</li>
+    </ul>
+  </section>
+
+  <footer>
+    <div class="row">
+      <div>
+        <div style="color:var(--ink);font-weight:650;margin-bottom:6px">dsh-image-skin · 图片皮肤</div>
+        <div>MIT © Hwayn（幻弈） · 协作者 Yucheng Xiao（肖宇成）</div>
+        <div style="margin-top:8px">
+          <a href="https://github.com/Hwayn-pixel/dsh-image-skin">GitHub</a> ·
+          <a href="https://www.npmjs.com/package/dsh-image-skin">npm</a> ·
+          <a href="https://github.com/Hwayn-pixel/dsh-image-skin/blob/main/README.md">English README</a> ·
+          <a href="https://github.com/Hwayn-pixel/dsh-image-skin/blob/main/README.zh-CN.md">中文 README</a>
+        </div>
+      </div>
+      <div style="max-width:44ch">
+        文档里的壁纸是授权图片（Wikimedia Commons，CC BY / CC BY-SA / 公有领域），不属于插件本体，仅用于配图。
+      </div>
+    </div>
+  </footer>
+</div>
+<script>
+  document.getElementById('copyBtn').addEventListener('click', async (e) => {
+    const cmd = 'dsh plugin --profile web add dsh-image-skin';
+    const btn = e.currentTarget;
+    try { await navigator.clipboard.writeText(cmd); btn.querySelector('span').textContent = '已复制 ✓  ' + cmd; }
+    catch { btn.querySelector('span').textContent = cmd; }
+    setTimeout(() => { btn.querySelector('span').textContent = '复制安装命令'; }, 2200);
+  });
+</script>
+</body>
+</html>
