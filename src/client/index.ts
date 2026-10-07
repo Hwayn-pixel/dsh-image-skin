@@ -18,6 +18,25 @@ const IMG_ALPHA_VAR = "--dsh-skin-img-opacity";
 const MAX_UPLOAD_MB = 24;
 
 /**
+ * Bilingual copy. One build serves every UI language: `t(zh, en)` returns the English string when
+ * the document (or browser) language is English, otherwise Chinese. The helper is a plain function
+ * so it can be called while rendering without a hook, and it is guarded so the offline bundle test
+ * (which evaluates this file with no DOM) still runs.
+ */
+function t(zh: string, en: string): string {
+  try {
+    const lang = String(
+      (typeof document !== "undefined" && document.documentElement && document.documentElement.lang) ||
+        (typeof navigator !== "undefined" && navigator.language) ||
+        "zh",
+    ).toLowerCase();
+    return lang.startsWith("en") ? en : zh;
+  } catch {
+    return zh;
+  }
+}
+
+/**
  * Settings transport, resolved at runtime because the two Host generations expose
  * different faces:
  *  - 0.1 line provides `settingsScope` (`bind({ namespace })` → durable namespace scope).
@@ -297,6 +316,7 @@ function ensureBaseStyles(): void {
     "transition:background .15s,border-color .15s}",
     ".dshImgSkin-btn:hover{background:var(--dsw-alias-interactive-bg-hover,rgba(128,128,128,.12))}",
     ".dshImgSkin-btn[disabled]{opacity:.5;cursor:not-allowed}",
+    ".dshImgSkin-btn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary,#5aa7d8);outline-offset:2px}",
     ".dshImgSkin-btn[data-active='true']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);color:var(--dsw-alias-brand-primary,#5aa7d8)}",
     ".dshImgSkin-btn[data-variant='primary']{border-color:var(--dsw-alias-brand-primary,#5aa7d8);color:var(--dsw-alias-brand-primary,#5aa7d8);background:color-mix(in srgb,var(--dsw-alias-brand-primary,#5aa7d8) 10%,transparent)}",
     ".dshImgSkin-btn[data-variant='quiet']{border-color:transparent;opacity:.7}",
@@ -2830,6 +2850,7 @@ function AreaRow(props: {
   const area = props.area;
   const v = props.value;
   const modeWord = props.mode === "dark" ? "深色" : "浅色";
+  const modeWordEn = props.mode === "dark" ? "dark" : "light";
   const specificField = `${area.id}Image${props.mode === "dark" ? "Dark" : "Light"}`;
   const sharedField = `${area.id}Image`;
   const specific = String(v[specificField] ?? "");
@@ -2843,13 +2864,27 @@ function AreaRow(props: {
   const isVideo = effective.length > 0 && VIDEO_RE.test(effective);
   const busy = props.busyField === specificField;
 
-  // A file picker bound to one target field. Rendered as a label so the whole button is
-  // clickable; the input itself stays hidden.
+  // A file picker bound to one target field. Rendered as a focusable `label` (role=button) so it
+  // is reachable by keyboard too: a bare `<label>` wrapping a hidden input is invisible to Tab, so
+  // a keyboard-only user could never upload at all. Enter / Space opens the picker, exactly like a
+  // real button; the input itself stays hidden.
   const picker = (key: string, label: string, field: string, variant?: string) =>
     h(
       "label",
-      { key, className: "dshImgSkin-btn", "data-variant": variant },
-      props.busyField === field ? "上传中…" : label,
+      {
+        key,
+        className: "dshImgSkin-btn",
+        "data-variant": variant,
+        role: "button",
+        tabIndex: 0,
+        onKeyDown: (e: any) => {
+          if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).querySelector<HTMLInputElement>('input[type="file"]')?.click();
+          }
+        },
+      },
+      props.busyField === field ? t("上传中…", "Uploading…") : label,
       h("input", {
         type: "file",
         accept: "image/*,video/*",
@@ -2904,10 +2939,10 @@ function AreaRow(props: {
         }),
         "启用",
       ),
-      picker("up-mode", `上传${modeWord}图`, specificField, "primary"),
+      picker("up-mode", t(`上传${modeWord}图`, `Upload ${modeWordEn} image`), specificField, "primary"),
       // Only offered when there is no shared image yet - otherwise the 清除 button already
       // covers it, and two near-identical upload buttons side by side just add noise.
-      sharedImage ? null : picker("up-shared", "上传通用图", sharedField, "quiet"),
+      sharedImage ? null : picker("up-shared", t("上传通用图", "Upload shared image"), sharedField, "quiet"),
       effective
         ? h(
             "button",
@@ -3831,6 +3866,17 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
     const configuredAreas = AREAS.filter((a) =>
       Boolean(v[`${a.id}Image`] || v[`${a.id}ImageLight`] || v[`${a.id}ImageDark`]),
     ).length;
+
+    // Returning users already have art configured, so drop them straight onto the workbench -
+    // the choice screen exists for first-timers who have nothing to work on yet. One-shot: it
+    // never fights a later manual navigation, and it never fires before the settings have loaded
+    // (while loading, every area reads empty, so `configuredAreas` is 0 and the effect just waits).
+    const landedOnWorkbench = React.useRef(false);
+    React.useEffect(() => {
+      if (landedOnWorkbench.current || configuredAreas === 0) return;
+      landedOnWorkbench.current = true;
+      setPage((p) => (p === "home" ? "images" : p));
+    }, [configuredAreas]);
     const accentIndex = Math.max(0, Math.min(ACCENT_LEVELS.length - 1, Math.round(Number(v.accentLevel ?? 0))));
     const sampledColours = String(v.accentPalette ?? "")
       .split("|")
@@ -4079,6 +4125,19 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
             {
               className: "dshImgSkin-btn",
               onClick: () => {
+                // Files on disk, gone for good - so ask first. The hint promises this can never
+                // touch a file some area still references, but the user should still be the one
+                // to pull the trigger.
+                if (
+                  !window.confirm(
+                    t(
+                      "清理未被引用的图片文件？用不到的旧文件会被永久删除，无法恢复。",
+                      "Delete stored image files that no longer belong to any area? They are erased permanently and cannot be recovered.",
+                    ),
+                  )
+                ) {
+                  return;
+                }
                 void (async () => {
                   const report = await collectUnusedFiles();
                   if (!report) {
@@ -4093,7 +4152,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
                 })();
               },
             },
-            "清理未使用图片",
+            t("清理未使用图片", "Clean up unused images"),
           ),
         ),
         gcStatus ? h("p", { className: "dshImgSkin-ok" }, gcStatus) : null,

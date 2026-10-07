@@ -210,3 +210,11 @@ repository.
 ## License
 
 MIT — see [LICENSE](LICENSE).
+
+## For both kinds of users
+
+- **第一次用**: 打开插件 →「贴图」→ 在「窗口」那一格放一张图，界面就换上了。
+- **想整屏换配色**: 「配色」那页有三种路线；拿不准就用默认那个（整屏染色）。
+- **想清掉旧图**: 存储那页的「清理未使用图片」会先问你一遍才删 —— 放心点。
+
+In one line: a first-timer gets running in one click; a regular keeps everything within reach.
