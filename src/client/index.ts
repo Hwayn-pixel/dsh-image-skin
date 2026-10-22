@@ -968,6 +968,28 @@ const ACCENT_SELECTOR = [
 /** Our own chrome and links must never be re-decorated. */
 const ACCENT_EXCLUDE = `[data-dsh-skin-chrome],[data-dsh-skin-chrome] *,[data-dsh-skin-sticker],[data-dsh-skin-sticker] *,a,[role="link"]`;
 
+/**
+ * Does this element paint a picture of its own that the accent must not erase?
+ *
+ * The accent rules assign `background-image` with `!important`, so decorating an element that
+ * already carries artwork replaces that artwork with a gradient. The fallback sweep marks
+ * anything small that draws a border, which is exactly the shape of a sticker grid: each cell is
+ * a ~76px bordered square whose background IS the sticker. The whole library then renders as
+ * empty tinted boxes - the pictures are still downloaded, they are just painted over.
+ *
+ * A missing hairline on such an element is invisible; a replaced picture is not. So the check is
+ * by what the element *paints*, not by which plugin owns it: `img`, and any non-`none`
+ * background-image that resolves to a `url()`.
+ */
+export function ownsArtwork(tagName: string, backgroundImage: string): boolean {
+  if (tagName === "IMG") return true;
+  return backgroundImage !== "none" && backgroundImage.includes("url(");
+}
+
+function paintsOwnArtwork(el: HTMLElement): boolean {
+  return ownsArtwork(el.tagName, getComputedStyle(el).backgroundImage);
+}
+
 const paletteCache = new Map<string, string[]>();
 /** Last palette we wrote to settings, so a lagging snapshot cannot make us write it again. */
 let paletteWriteKey: string | null = null;
@@ -1276,7 +1298,8 @@ function visible(el: HTMLElement): boolean {
  */
 function scanAccentTargets(): HTMLElement[] {
   const found = new Set<HTMLElement>();
-  const usable = (el: HTMLElement): boolean => !el.closest(ACCENT_EXCLUDE) && visible(el);
+  const usable = (el: HTMLElement): boolean =>
+    !el.closest(ACCENT_EXCLUDE) && visible(el) && !paintsOwnArtwork(el);
 
   document.querySelectorAll<HTMLElement>(ACCENT_SELECTOR).forEach((el) => {
     if (usable(el)) found.add(el);

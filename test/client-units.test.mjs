@@ -213,5 +213,24 @@ console.log("\n== accent ramp ==");
   check("cover ramp interpolates too", Math.abs(ramp(cover, 0.5) - 0.2) < 1e-9, String(ramp(cover, 0.5)));
 }
 
+// ── 自带画面的小方块不能被染色规则吃掉 ─────────────────────────────────────────
+// The fallback sweep marks anything small that draws a border, and the accent rules then set
+// background-image !important. A sticker grid is exactly that shape (a ~76px bordered square
+// whose background IS the sticker), so every cell rendered as an empty tinted box while the
+// pictures stayed downloaded. The guard is by what the element paints, not by who owns it.
+console.log("\n== own artwork ==");
+{
+  const owns = mod.ownsArtwork;
+  check("ownsArtwork is exposed", typeof owns === "function");
+  check("an <img> always counts", owns("IMG", "none") === true);
+  check("an <img> counts even with a background", owns("IMG", 'url("a.png")') === true);
+  check("a background url counts", owns("DIV", 'url("a.png")') === true);
+  check("a gradient over a url still counts", owns("DIV", 'url("a.png"), linear-gradient(red, blue)') === true);
+  check("a plain gradient does not count", owns("DIV", "linear-gradient(red, blue)") === false);
+  check("no background does not count", owns("DIV", "none") === false);
+  check("a button with a colour only does not count", owns("BUTTON", "rgba(0, 0, 0, 0)") === false);
+  check("the tag comparison is case-exact", owns("img", "none") === false, String(owns("img", "none")));
+}
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
