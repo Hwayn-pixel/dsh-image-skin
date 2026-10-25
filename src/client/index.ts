@@ -9,6 +9,13 @@
  */
 import * as React from "react";
 
+/**
+ * The reasoning-effort slider, ported in from dsh-codex-effort-slider and appended to this bundle
+ * by build.mjs (see src/client/effort.js). Declared here so the compiler knows the name; at runtime
+ * it is a hoisted function in the shared bundle factory scope.
+ */
+declare function activateEffortSlider(ctx: unknown): void;
+
 const NS = "ui-image-skin";
 const ROUTE_PREFIX = "/dsh-image-skin";
 const BODY_ATTR = "data-dsh-image-skin";
@@ -816,6 +823,40 @@ function applyWindow(value: SkinValue, mode: Mode, fade = false): void {
   paintedWindowImage = image;
 }
 
+// ── auto opacity (fit to how much text is on screen) ────────────────────────
+
+/** Auto-fit bounds: few words -> see-through enough to enjoy the wallpaper; lots -> readable. */
+const AUTO_OPACITY_MIN = 45;
+const AUTO_OPACITY_MAX = 100;
+/** Character counts at which the mapping saturates. */
+const AUTO_CHARS_LOW = 300;
+const AUTO_CHARS_HIGH = 3500;
+
+/** Rough "how much text is on screen": characters in the main column plus the composer. */
+function measureTextVolume(): number {
+  if (typeof document === "undefined") return 0;
+  let chars = 0;
+  const col =
+    document.querySelector('[class*="_centerCol"]') ||
+    document.querySelector("main") ||
+    document.querySelector('[role="main"]');
+  if (col instanceof HTMLElement) chars += (col.innerText || "").length;
+  const composer = document.querySelector('textarea, [contenteditable="true"]');
+  if (composer instanceof HTMLElement) chars += (composer.innerText || "").length;
+  return chars;
+}
+
+/**
+ * The opacity that fits the current text volume. Few words -> low (wallpaper shows through);
+ * lots of words -> high (the panel turns solid so the text stays legible). Linear between the
+ * two thresholds, clamped to the bounds.
+ */
+function autoPanelOpacity(): number {
+  const chars = measureTextVolume();
+  const ratio = Math.max(0, Math.min(1, (chars - AUTO_CHARS_LOW) / (AUTO_CHARS_HIGH - AUTO_CHARS_LOW)));
+  return Math.round(AUTO_OPACITY_MIN + ratio * (AUTO_OPACITY_MAX - AUTO_OPACITY_MIN));
+}
+
 // ── panel translucency + image alpha (shared slider) ────────────────────────
 
 function applyPanelOpacity(value: SkinValue, mode: Mode): void {
@@ -845,7 +886,11 @@ function applyPanelOpacity(value: SkinValue, mode: Mode): void {
     // Declared theme token: "Sidebar column and title-row background". Missing from this
     // list, the sidebar kept its opaque fill and stayed white however low the slider went.
     `  --dsw-specific-sidebar-fill: rgba(${rgb}, ${l(0)});`,
-    `  --dsw-specific-app-shell: rgba(${rgb}, ${Math.max(0, a - 0.2).toFixed(3)});`,
+    // The app shell used to sit 0.2 below the panels, so the top bar read as a lighter
+    // strip than the content under it. He asked for one level (方案 B): the shell now
+    // follows the same opacity as the panels, keeping the layering inside the content
+    // rather than between the chrome and the page.
+    `  --dsw-specific-app-shell: rgba(${rgb}, ${l(0)});`,
     `}`,
     // The settings dialog is where the opacity slider lives, so letting it inherit the slider's
     // translucency made the one screen you configure from the hardest to read - and the wallpaper
@@ -2018,20 +2063,11 @@ function accentCss(
     `  transition: background-color .18s ease var(--dsh-skin-delay, 0s), filter .18s ease, transform .18s ease, outline-color .18s ease var(--dsh-skin-delay, 0s) !important;`,
     `}`,
   );
-  // 让位 (yield): where the picture is busy, decoration steps back - less tint, no gradient, no
-  // frame, and only a quarter-strength line (a control still has to read as a control). This is
-  // the fix for ornaments fighting the subject.
-  lines.push(
-    `${root} [${ACCENT_MARK}][data-dsh-skin-busy="1"] {`,
-    // 让位 must not mean *whiter*: in a light theme a white wash sat brighter than the tinted glass
-    // around it, so a "quiet" control read as a glaring block. Step back inside our own colour
-    // family instead - the panel's own tone, at a lower alpha - so it stays monochrome.
-    `  background-color: rgba(${painting ? panelTone : neutralWash}, ${(painting ? Math.max(0.08, cover * 0.34) : cover * 0.22).toFixed(3)}) !important;`,
-    `  background-image: none !important;`,
-    `  border-image-source: none !important;`,
-    `  outline-color: rgba(${line}, ${(alpha * 0.45).toFixed(3)}) !important;`,
-    `}`,
-  );
+  // 让位 (yield) is intentionally off (方案 B). It used to drop controls that sat over a busy
+  // part of the picture to ~1/3 of the normal cover, which read as a random pale patch rather
+  // than a deliberate layer. Every control now keeps the same level as its neighbours; the
+  // layering comes from the tone/cover ramp, not from where the picture happens to be busy.
+  // (BUSY_ATTR is still stamped for diagnostics, it just no longer changes the paint.)
   // 火花 (the spark): the picture's most vivid colour is reserved for "you can touch this" -
   // hover, focus, pressed and selected. Used nowhere else, so it stays meaningful.
   lines.push(
@@ -2068,10 +2104,10 @@ function accentCss(
     `  border-color: rgba(${accent}, .9) !important;`,
     `}`,
   );
-  if (colourStyle !== "marks") lines.push(hairline(`${small}:not([data-dsh-skin-busy="1"])`));
+  if (colourStyle !== "marks") lines.push(hairline(small));
   else
     lines.push(
-      `${small}:focus-visible:not([data-dsh-skin-busy="1"]) {`,
+      `${small}:focus-visible {`,
       `  outline: 1px solid rgba(${ink}, .55) !important;`,
       `  outline-offset: -1px !important;`,
       `}`,
@@ -2106,8 +2142,8 @@ function accentCss(
   // something you can act on.
   const panelLine =
     colourStyle === "marks"
-      ? hairline(`${panel}:not([data-dsh-skin-busy="1"])`).replace(`rgba(${line}, `, `rgba(${neutralInk}, `).replace(`, ${alpha})`, ", .16)")
-      : hairline(`${panel}:not([data-dsh-skin-busy="1"])`);
+      ? hairline(`${panel}`).replace(`rgba(${line}, `, `rgba(${neutralInk}, `).replace(`, ${alpha})`, ", .16)")
+      : hairline(`${panel}`);
   if (level === 0) {
     lines.push(panelLine);
     return finish();
@@ -4091,6 +4127,34 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           onPreview: (n: number) => applyPanelOpacity({ ...v, panelOpacity: n }, mode),
           onCommit: (n: number) => apply("panelOpacity", n),
         }),
+        h(
+          "div",
+          { className: "dshImgSkin-row" },
+          h(
+            "div",
+            { className: "dshImgSkin-head" },
+            h(
+              "div",
+              null,
+              h("span", { className: "dshImgSkin-title" }, "自动适配"),
+              h(
+                "small",
+                { className: "dshImgSkin-hint" },
+                "开启后按当前对话的文字量实时调整面板不透明度 —— 字少更透（看到壁纸），字多更实（读得清），不用手动管",
+              ),
+            ),
+            h(
+              "label",
+              { className: "dshImgSkin-switch" },
+              h("input", {
+                type: "checkbox",
+                checked: v.autoOpacity === true,
+                onChange: (e: any) => apply("autoOpacity", e.target.checked),
+              }),
+              "开启",
+            ),
+          ),
+        ),
         h(SliderRow, {
           key: "rate",
           title: "视频播放速率",
@@ -4348,6 +4412,18 @@ export function apply(ctx: ClientContext): void {
         if (!img || !VIDEO_RE.test(img)) return;
         void applyAccent(v, modeStore.get(), commit, true);
       }, 8000);
+      // 自动不透明度: with the switch on, follow how much text is on screen and keep the panel
+      // opacity in step - few words -> see-through, lots -> readable. Throttled: it only writes
+      // when the value actually moves by a whole percent.
+      const autoOpacityTimer = window.setInterval(() => {
+        const snapshot = scope.getSnapshot();
+        const v = snapshot.value;
+        if (!v || v.autoOpacity !== true) return;
+        const n = autoPanelOpacity();
+        if (Math.abs(n - Number(v.panelOpacity ?? 85)) < 1) return;
+        applyPanelOpacity({ ...v, panelOpacity: n }, modeStore.get());
+        commit({ panelOpacity: n });
+      }, 1200);
       // Repaint on structural churn (regions mounting/unmounting, re-renders) and on
       // theme flips. Attribute observation stays limited to the theme flag, so our own
       // inline styles and data-* tags can never re-trigger the observer.
@@ -4371,6 +4447,7 @@ export function apply(ctx: ClientContext): void {
           gcTimer = null;
         }
         clearInterval(breatheTimer);
+        clearInterval(autoOpacityTimer);
         if (themeAnimTimer) {
           clearTimeout(themeAnimTimer);
           themeAnimTimer = null;
@@ -4431,4 +4508,13 @@ export function apply(ctx: ClientContext): void {
       ModeAction,
     ),
   );
+
+  // ── the reasoning-effort slider (folded in from its own plugin) ─────────────
+  // It activates only when its services exist (locale / sessions / modelDirectories …). If a
+  // generation does not provide them it simply never appears; the rest of the skin is untouched.
+  try {
+    activateEffortSlider(ctx);
+  } catch (error) {
+    console.warn("dsh-image-skin: effort slider not activated", error);
+  }
 }

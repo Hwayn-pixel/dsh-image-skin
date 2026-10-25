@@ -45,7 +45,11 @@ function build() {
   const host = transpile("index.ts", ts.ModuleKind.ESNext);
   writeFileSync(join(libDir, "index.js"), host);
   const client = transpile(join("client", "index.ts"), ts.ModuleKind.CommonJS);
-  writeFileSync(join(libDir, "client.js"), `${clientBanner}\n${client}\n${clientFooter}`);
+  // The effort slider is ported in from its own plugin: the loader runs a single factory, so the
+  // ported module has to be appended into the same bundle file. It defines `activateEffortSlider`,
+  // which index.ts calls (hoisted function declaration in the shared factory scope).
+  const effort = transpile(join("client", "effort.js"), ts.ModuleKind.CommonJS);
+  writeFileSync(join(libDir, "client.js"), `${clientBanner}\n${client}\n${effort}\n${clientFooter}`);
   console.log("dsh-image-skin: built lib/index.js + lib/client.js");
 }
 
