@@ -854,7 +854,17 @@ function measureTextVolume(): number {
  */
 function autoPanelOpacity(): number {
   const chars = measureTextVolume();
-  const ratio = Math.max(0, Math.min(1, (chars - AUTO_CHARS_LOW) / (AUTO_CHARS_HIGH - AUTO_CHARS_LOW)));
+  const byText = Math.max(0, Math.min(1, (chars - AUTO_CHARS_LOW) / (AUTO_CHARS_HIGH - AUTO_CHARS_LOW)));
+  // 文字量不是唯一变量：亮壁纸（云、雪、白墙、白天的视频帧）会把半透的浅色面板“漂白”，
+  // 文字对对比度掉得最狠 —— 而这时候对话可能还很短，旧逻辑会给最透的那一档。
+  // 所以再按壁纸平均亮度要一次：0.55 以下不管（不影响看壁纸），0.95 以上拉满，两者取较大值。
+  const reading = accentPreviewInputs?.reading;
+  const artLum =
+    reading && reading.density.length
+      ? reading.density.reduce((sum, cell) => sum + cell.lum, 0) / reading.density.length
+      : 0;
+  const byArt = Math.max(0, Math.min(1, (artLum - 0.55) / 0.4));
+  const ratio = Math.max(byText, byArt);
   return Math.round(AUTO_OPACITY_MIN + ratio * (AUTO_OPACITY_MAX - AUTO_OPACITY_MIN));
 }
 
