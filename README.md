@@ -34,6 +34,8 @@ picture. Everything you see here is local: the image, the palette, the stickers.
 | 🫧 **Panel translucency** | One slider makes DSH's own surfaces see-through so the wallpaper shows through — while the wallpaper itself is deliberately *not* dimmed. |
 | 🎨 **The interface takes colour from your picture** | Buttons, inputs, dialogs and rails stop being grey: one hue is sampled from your wallpaper (a real frame, even for video), every step is contrast-checked, and the **depth slider is stepless**. |
 | 🪶 **Smooth, and it stays smooth** | Big DOM, long conversation — the cross-fade only animates what a compositor can, and stops touching text colour when the tree gets heavy. |
+| 🗜️ **Upload-optimised** | Big pictures are downscaled to a 2560px longest edge and re-encoded to WebP inside the browser before they are stored (GIF / SVG / video untouched). Less disk, and a noticeably lighter settings page. |
+| 📦 **Skin pack** | The whole skin (images + every setting) as one file: back it up, move machines, hand it to a friend. Import only adds, and an API key never travels in a pack. |
 | 🔒 **Local-only, and reversible** | Files live in `$DSH_HOME/image-skin/`. Disable the plugin and every style, sticker and video layer it added goes away. |
 
 > **A feature that came and went.** An early line of work tried *letting a text-to-image model draw an
@@ -121,6 +123,10 @@ The bundled helper does steps 1–2 for you: `node scripts/install.mjs --profile
   its artwork comes from (`浅色专用` / `两模式共用` / `未设置`), and its controls.
 - **全局效果 / Global** — panel opacity, video playback rate.
 - **存储 / Storage** — `清理未使用图片` collects stored files no area references any more.
+- **皮肤包 / Skin pack** — export the whole skin (settings + every referenced image) as one
+  `dsh-image-skin-YYYY-MM-DD.pack.json`, or import such a file back. Import adds missing images and
+  never deletes stored files; files that already exist are skipped, and `accentApiKey` in a pack is
+  ignored (the receiving machine keeps its own key).
 
 **「配色」/ Colour** — let the interface follow the picture (**give the Window region an image first**;
 the palette is sampled from it):
@@ -142,8 +148,14 @@ the palette is sampled from it):
 | 填充 | `cover` / `contain` / `tile` (regions only) |
 | 编辑位置 | stickers only — drag to move, corner handle to scale |
 | 面板不透明度 | one slider for all DSH surfaces |
+| Skin pack | export / import the whole skin (never carries an API key) |
 
 Sampling and tinting happen **entirely on your machine**: no network, no cost, no key.
+
+Uploads are optimised **in the browser before they are sent**: anything whose longest edge exceeds
+2560 or that is heavier than 700 KB is re-encoded to WebP (q=0.88) on a canvas; GIF, SVG and video
+are stored untouched (a canvas would flatten an animation), and a re-encode that comes out larger is
+discarded in favour of the original.
 
 ## Compatibility
 

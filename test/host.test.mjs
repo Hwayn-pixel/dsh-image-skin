@@ -6,7 +6,7 @@
  *
  *   node test/host.test.mjs      # exits non-zero on the first failed assertion set
  */
-import { existsSync, mkdtempSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -600,6 +600,54 @@ check("Config schema is exported for the Host settings mirror", typeof mod.Confi
     JSON.stringify(report),
   );
   check("live Config: the referenced file survives", existsSync(join(home, "image-skin", keep)));
+}
+
+console.log("== skin pack ==");
+{
+  // One referenced file, plus a secret that must never leave the machine.
+  const up = json(await call("POST", "/dsh-image-skin/upload", JSON.stringify({ image: dataUri })));
+  const url = up.url;
+  const filename = url.split("/").pop();
+  fakeSettings.value = { enabled: true, windowImage: url, accentLevel: 2.5, accentApiKey: "sk-must-not-leave" };
+
+  const exp = await call("GET", "/dsh-image-skin/export");
+  const pack = json(exp);
+  check("export -> 200", exp.status === 200);
+  check(
+    "export is a download with a dated filename",
+    /attachment; filename="dsh-image-skin-\d{4}-\d{2}-\d{2}\.pack\.json"/.test(exp.headers?.["content-disposition"] ?? ""),
+    exp.headers?.["content-disposition"],
+  );
+  check("export carries the format tag", pack?.format === mod.PACK_FORMAT && pack?.version === mod.PACK_VERSION);
+  check("export carries the referenced file", pack?.files?.length === 1 && pack.files[0]?.filename === filename);
+  check("export carries the settings", pack?.settings?.windowImage === url && pack?.settings?.accentLevel === 2.5);
+  check("export strips the API key", pack?.settings !== undefined && !("accentApiKey" in pack.settings));
+  check("export counts its files in a header", exp.headers?.["x-dsh-skin-files"] === "1");
+
+  // Lose the file, then restore it from the pack.
+  unlinkSync(join(home, "image-skin", filename));
+  const back = await call("POST", "/dsh-image-skin/import", JSON.stringify(pack));
+  const report = json(back);
+  check("import -> 200", back.status === 200, back.body);
+  check("import restores the missing file", report?.restored === 1 && existsSync(join(home, "image-skin", filename)));
+  check("import hands the settings back", report?.settings?.windowImage === url);
+  check("import never hands a key back", report?.settings !== undefined && !("accentApiKey" in report.settings));
+
+  const twice = json(await call("POST", "/dsh-image-skin/import", JSON.stringify(pack)));
+  check("a second import skips the existing file", twice?.restored === 0 && twice?.skipped === 1, JSON.stringify(twice));
+
+  const foreign = await call("POST", "/dsh-image-skin/import", JSON.stringify({ hello: "world" }));
+  check("a foreign JSON is refused", foreign.status === 400 && Boolean(json(foreign)?.error));
+
+  const evil = json(
+    await call(
+      "POST",
+      "/dsh-image-skin/import",
+      JSON.stringify({ format: mod.PACK_FORMAT, version: 1, files: [{ filename: "../../evil.png", data: PNG }] }),
+    ),
+  );
+  check("a traversal filename is rejected", evil?.restored === 0 && evil?.rejected === 1, JSON.stringify(evil));
+  check("nothing from a traversal lands on disk", !existsSync(join(home, "image-skin", "evil.png")));
 }
 
 console.log("== disposer ==");

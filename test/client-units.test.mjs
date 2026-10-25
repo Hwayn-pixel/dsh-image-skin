@@ -213,5 +213,76 @@ console.log("\n== accent ramp ==");
   check("cover ramp interpolates too", Math.abs(ramp(cover, 0.5) - 0.2) < 1e-9, String(ramp(cover, 0.5)));
 }
 
+// ── 可读性：文字色要和「合成后的背景」算对比度 ────────────────────────────────
+// He pointed at two screenshots: a number field nearly floating on cloud wallpaper, and pale grey
+// body text on a pale blue card. Both are label tokens compared against the panel colour *with the
+// wallpaper ignored*. Pin the arithmetic and the resulting contrast, or this silently regresses.
+console.log("\n== readable labels ==");
+{
+  const lumOf = (triple) => {
+    const [r, g, b] = String(triple).split(",").map(Number);
+    const lin = (v) => {
+      const x = v / 255;
+      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+    };
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+  };
+  const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+
+  check("composited surface: a bright wallpaper stays bright", mod.compositedSurfaceLum(0.95, 0.85, "light") > 0.9);
+  check("composited surface: a dark wallpaper drags a light panel down", mod.compositedSurfaceLum(0.05, 0.5, "light") < 0.55);
+  check("composited surface: clamped", mod.compositedSurfaceLum(2, 0.5, "dark") <= 1);
+
+  // The screenshot scene: cloud-bright wallpaper under an 85% light panel.
+  const bright = mod.compositedSurfaceLum(0.92, 0.85, "light");
+  const caption = mod.readableLabel(0.56, bright, 4.5);
+  check(
+    "the faint caption clears 4.5:1 on a bright wallpaper",
+    ratio(lumOf(caption), bright) >= 4.49,
+    `${ratio(lumOf(caption), bright).toFixed(2)}:1`,
+  );
+  const secondary = mod.readableLabel(0.4, bright, 5);
+  check("secondary clears 5:1", ratio(lumOf(secondary), bright) >= 4.99, `${ratio(lumOf(secondary), bright).toFixed(2)}:1`);
+  const primary = mod.readableLabel(0.1, bright, 7);
+  check("primary clears 7:1", ratio(lumOf(primary), bright) >= 6.99, `${ratio(lumOf(primary), bright).toFixed(2)}:1`);
+
+  // A dark wallpaper under a very translucent panel: the label must turn *light* instead.
+  const darkSurface = mod.compositedSurfaceLum(0.04, 0.3, "light");
+  const onDark = mod.readableLabel(0.4, darkSurface, 4.5);
+  check(
+    "on a dark surface the label separates from it",
+    Math.abs(lumOf(onDark) - darkSurface) > 0.2,
+    `${lumOf(onDark).toFixed(2)} vs ${darkSurface.toFixed(2)}`,
+  );
+  // Black and white cross over at ≈0.18; only that narrow band has no colour reaching 4.5:1.
+  // Anywhere else the fallback picks the winner, so the target is still met.
+  const best = Math.max(ratio(0, darkSurface), ratio(1, darkSurface));
+  check(
+    "and reaches the best contrast that surface allows",
+    Math.abs(ratio(lumOf(onDark), darkSurface) - best) < 0.02 && best >= 4.49,
+    `${ratio(lumOf(onDark), darkSurface).toFixed(2)}:1 vs best ${best.toFixed(2)}:1`,
+  );
+}
+
+// ── 上传优化：只有值得重编码的才动 ──────────────────────────────────────────────
+// Re-encoding costs a decode + a WebP encode, so the rule has to be honest about what it skips:
+// an animated GIF would lose its animation (a canvas keeps one frame) and an SVG is already small
+// and resolution-free. Pin those three refusals, or a future "simplify" turns GIF skins static.
+console.log("\n== upload optimisation rule ==");
+{
+  const rule = mod.shouldOptimizeUpload;
+  check("the rule is exported", typeof rule === "function");
+  if (typeof rule === "function") {
+    check("a big JPEG is re-encoded", rule("image/jpeg", 3 * 1024 * 1024, 4000, 3000) === true);
+    check("an oversized PNG is re-encoded even when light on disk", rule("image/png", 100_000, 5000, 2500) === true);
+    check("a modest PNG under the cap is kept", rule("image/png", 100_000, 2000, 1200) === false);
+    check("a heavy photo inside the cap is re-encoded", rule("image/jpeg", 2 * 1024 * 1024, 2560, 1440) === true);
+    check("exactly at the cap and light is kept", rule("image/png", 700 * 1024, 2560, 2560) === false);
+    check("a GIF is never re-encoded (animation would collapse)", rule("image/gif", 5 * 1024 * 1024, 600, 600) === false);
+    check("an SVG is never re-encoded", rule("image/svg+xml", 900_000, 4000, 4000) === false);
+    check("a video is never re-encoded", rule("video/mp4", 9 * 1024 * 1024, 1920, 1080) === false);
+  }
+}
+
 console.log(`\nRESULT: ${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

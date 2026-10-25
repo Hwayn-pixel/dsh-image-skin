@@ -71,6 +71,9 @@ function buildShape(markLive: boolean): Record<string, unknown> {
   const shape: Record<string, unknown> = {
     enabled: mark(z.boolean().default(true).description("总开关：关闭后所有图片皮肤失效")),
     panelOpacity: mark(z.number().min(0).max(100).default(85).role("slider").description("UI 面板不透明度（越低越能透出背景图）")),
+    // 输入类控件单独一档：面板可以很透（看得到壁纸），但输入框里“你正在读自己打的字”。
+    // 用户指出的那两张截图里，最刺眼的就是数字输入框和卡片正文。
+    inputOpacity: mark(z.number().min(0).max(100).default(95).role("slider").description("输入框 / 下拉框 / 文本域的不透明度（与面板分开调）")),
   autoOpacity: mark(z.boolean().default(false).description("自动按当前文字量实时调节面板不透明度")),
     videoPlaybackRate: mark(z.number().min(0.1).max(4).default(1).role("slider").description("视频播放速率（作用于所有上传的视频：窗口壁纸与角标）")),
   };
@@ -140,6 +143,30 @@ const EXTENSIONS: Record<string, string> = {
 };
 const FILE_RE = /^[0-9a-f-]+\.(png|jpg|jpeg|gif|webp|svg|avif|mp4|webm)$/i;
 const FILE_URL_RE = /\/dsh-image-skin\/files\/([^/?#"\s]+)/g;
+
+/**
+ * Shareable skin pack: the settings document plus every stored file it references, base64'd
+ * into one JSON object. One file to back up, mail, or keep in a gist — and the receipt for
+ * "I cleared my browser data and lost my whole skin".
+ *
+ * Secrets never travel: `accentApiKey` is stripped on export and ignored on import, so a pack
+ * handed to someone else can never carry a key, and restoring your own pack never overwrites
+ * the key already on the receiving machine.
+ */
+export const PACK_FORMAT = "dsh-image-skin-pack";
+export const PACK_VERSION = 1;
+/** Packs carry several files at once, so the body cap is well above the single-upload one. */
+export const MAX_PACK_BYTES = 192 * 1024 * 1024;
+const SECRET_FIELDS = ["accentApiKey"] as const;
+
+/** Content type for a stored filename (the name is a UUID plus an extension, nothing else). */
+function mimeOf(filename: string): string {
+  const ext = filename.split(".").pop()!.toLowerCase();
+  if (ext === "svg") return "image/svg+xml";
+  if (ext === "mp4") return "video/mp4";
+  if (ext === "webm") return "video/webm";
+  return `image/${ext === "jpg" ? "jpeg" : ext}`;
+}
 
 // ── text-to-image providers ─────────────────────────────────────────────────
 //
@@ -578,6 +605,115 @@ function skinDir(): string {
   return dir;
 }
 
+interface PackFile {
+  filename: string;
+  mime: string;
+  data: string;
+}
+
+/**
+ * Build the exportable pack. Only files the settings actually point at are included, so a pack
+ * stays as small as the skin it describes (an old, unreferenced upload does not ride along).
+ * Referenced-but-missing files are reported instead of silently dropped - that is exactly the
+ * state a half-restored skin is in, and the user should be told.
+ */
+function buildPack(value: unknown): { pack: Record<string, unknown>; fileCount: number; missing: string[] } {
+  const referenced = referencedFiles(value);
+  const files: PackFile[] = [];
+  const missing: string[] = [];
+  for (const filename of [...referenced].sort()) {
+    try {
+      const bytes = readFileSync(join(skinDir(), filename));
+      files.push({ filename, mime: mimeOf(filename), data: bytes.toString("base64") });
+    } catch {
+      missing.push(filename);
+    }
+  }
+  const settings: Record<string, unknown> = {};
+  if (value !== null && typeof value === "object") {
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if ((SECRET_FIELDS as readonly string[]).includes(key)) continue;
+      settings[key] = entry;
+    }
+  }
+  return {
+    pack: {
+      format: PACK_FORMAT,
+      version: PACK_VERSION,
+      exportedAt: new Date().toISOString(),
+      settings,
+      files,
+    },
+    fileCount: files.length,
+    missing,
+  };
+}
+
+interface ImportReport {
+  restored: number;
+  skipped: number;
+  rejected: number;
+  settings: Record<string, unknown>;
+}
+
+/**
+ * Land a pack on disk and hand the settings back for the Client to write.
+ *
+ * Two deliberate choices:
+ *  - a file that already exists is *skipped*, never overwritten (names are UUIDs, so an existing
+ *    file means a previous import of the same pack - rewriting it would only burn disk I/O);
+ *  - only well-formed settings keys travel back, and secrets are dropped again on the way in,
+ *    so a hand-edited pack cannot inject stray config or someone else's API key.
+ */
+function restorePack(raw: unknown): ImportReport | { error: string } {
+  if (raw === null || typeof raw !== "object") return { error: "不是一个皮肤包" };
+  const pack = raw as Record<string, unknown>;
+  if (pack.format !== PACK_FORMAT) return { error: "格式不对：这不是 dsh-image-skin 的皮肤包" };
+  if (Number(pack.version) > PACK_VERSION) {
+    return { error: `这个皮肤包来自更新的插件版本（v${String(pack.version)}），请先升级插件` };
+  }
+  const files = Array.isArray(pack.files) ? pack.files : [];
+  const dir = skinDir();
+  let restored = 0;
+  let skipped = 0;
+  let rejected = 0;
+  for (const entry of files) {
+    const filename = String((entry as PackFile | undefined)?.filename ?? "");
+    if (!FILE_RE.test(filename)) {
+      rejected++;
+      continue;
+    }
+    const target = join(dir, filename);
+    if (existsSync(target)) {
+      skipped++;
+      continue;
+    }
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(String((entry as PackFile).data ?? ""), "base64");
+    } catch {
+      rejected++;
+      continue;
+    }
+    if (!bytes.length) {
+      rejected++;
+      continue;
+    }
+    writeFileSync(target, bytes);
+    restored++;
+  }
+  const settings: Record<string, unknown> = {};
+  const rawSettings = pack.settings;
+  if (rawSettings !== null && typeof rawSettings === "object") {
+    for (const [key, entry] of Object.entries(rawSettings as Record<string, unknown>)) {
+      if ((SECRET_FIELDS as readonly string[]).includes(key)) continue;
+      if (!/^[a-zA-Z][a-zA-Z0-9]*$/.test(key)) continue;
+      settings[key] = entry;
+    }
+  }
+  return { restored, skipped, rejected, settings };
+}
+
 interface HostContext {
   inject(services: readonly string[], fn: (ctx: HostContext) => void): unknown;
   effect(fn: () => (() => void) | void, label?: string): unknown;
@@ -853,6 +989,41 @@ export function apply(ctx: HostContext, config?: Record<string, unknown>): void 
                 }
                 return ok(200, collectUnused(value));
               }
+              // GET /dsh-image-skin/export — one downloadable pack: settings + referenced files.
+              if (req.method === "GET" && url.pathname === `${ROUTE_PREFIX}/export`) {
+                const { pack, fileCount, missing } = buildPack(readValue());
+                if (missing.length) console.warn(`[dsh-image-skin] export: ${missing.length} referenced file(s) missing`);
+                const stamp = new Date().toISOString().slice(0, 10);
+                res.writeHead(200, {
+                  "content-type": "application/json; charset=utf-8",
+                  "content-disposition": `attachment; filename="dsh-image-skin-${stamp}.pack.json"`,
+                  "cache-control": "no-store",
+                  "x-dsh-skin-files": String(fileCount),
+                });
+                res.end(JSON.stringify(pack));
+                return;
+              }
+              // POST /dsh-image-skin/import — land the pack's files, hand its settings back.
+              if (req.method === "POST" && url.pathname === `${ROUTE_PREFIX}/import`) {
+                let body: string;
+                try {
+                  body = await readBody(req, MAX_PACK_BYTES);
+                } catch (error) {
+                  if ((error as { code?: string }).code === "E_TOO_LARGE") {
+                    return ok(413, { error: `皮肤包过大：上限 ${Math.round(MAX_PACK_BYTES / 1024 / 1024)} MB` });
+                  }
+                  throw error;
+                }
+                let parsed: unknown;
+                try {
+                  parsed = JSON.parse(body);
+                } catch {
+                  return ok(400, { error: "皮肤包不是有效的 JSON" });
+                }
+                const report = restorePack(parsed);
+                if ("error" in report) return ok(400, report);
+                return ok(200, report);
+              }
               // GET /dsh-image-skin/files — list stored images (newest first)
               if (req.method === "GET" && url.pathname === `${ROUTE_PREFIX}/files`) {
                 let files: string[] = [];
@@ -901,9 +1072,7 @@ export function apply(ctx: HostContext, config?: Record<string, unknown>): void 
                   res.end("not found");
                   return;
                 }
-                const ext = filename.split(".").pop()!.toLowerCase();
-                const type =
-                  ext === "svg" ? "image/svg+xml" : ext === "mp4" ? "video/mp4" : ext === "webm" ? "video/webm" : `image/${ext === "jpg" ? "jpeg" : ext}`;
+                const type = mimeOf(filename);
                 // A stored file never changes under its URL (the name is a UUID minted per
                 // upload), so let the browser keep it: without this the mode switch re-fetched
                 // the whole wallpaper every time, which is the stall you feel on a big image.

@@ -280,6 +280,7 @@ function ensureBaseStyles(): void {
     ".dshImgSkin-card{border:var(--fx-line);border-radius:var(--fx-r-md);box-shadow:var(--fx-shadow-1);",
     "background:var(--dsw-alias-bg-layer-1,transparent);padding:14px 16px;display:flex;flex-direction:column;gap:12px}",
     ".dshImgSkin-cardhead{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}",
+    ".dshImgSkin-packrow{display:flex;gap:8px;flex-wrap:wrap}",
     ".dshImgSkin-title{font-weight:600;font-size:13.5px;letter-spacing:.2px}",
     ".dshImgSkin-sub{font-size:11.5px;line-height:1.55;opacity:.84;margin:3px 0 0}",
     ".dshImgSkin-hint{font-size:11.5px;line-height:1.55;opacity:.85;display:block;margin-top:3px}",
@@ -1498,8 +1499,21 @@ interface AccentScheme {
   raisedHi: string;
   raisedDown: string;
   accent: string;
-  /** Text colour to use *on* the accent rung (the only text colour we touch). */
+  /** Text colour to use *on* the accent rung. */
   accentInk: string;
+  /**
+   * The label tokens. DSH's defaults are built for an opaque surface; once a tinted, translucent
+   * panel sits on a wallpaper, the faintest rungs (caption / tertiary) fall to ~2:1 — that is the
+   * "small grey text on pale blue" that was unreadable in his screenshots. These are walked against
+   * the *composited* background instead, and only as far as the target, so the original hierarchy
+   * (primary darkest / caption faintest) survives.
+   */
+  labelPrimary: string;
+  labelSecondary: string;
+  labelTertiary: string;
+  labelCaption: string;
+  /** Field fill alpha (input / select / textarea), from the inputOpacity setting. */
+  inputAlpha: number;
 }
 
 /** One hue in, a whole scheme out: three roles, contrast-checked against the surface. */
@@ -1599,10 +1613,18 @@ function tokenLanguage(scheme: AccentScheme, mode: Mode): string {
       const chroma = brand ? Math.min(0.7, Math.max(0.36, sat)) : dark ? 0.1 : 0.07;
       return `  ${name}: rgb(${hslTriple(hue, chroma, l).join(", ")});`;
     }),
+    // 文字 token：按「合成后的真实背景」校准过的四档（见 deriveScheme 里的 labelOn）。
+    // 只接管这四档 —— label-primary-foreground / link / error 等语义色各自背景不同，不动。
+    `  --dsw-alias-label-primary: rgb(${scheme.labelPrimary}) !important;`,
+    `  --dsw-alias-label-secondary: rgb(${scheme.labelSecondary}) !important;`,
+    `  --dsw-alias-label-tertiary: rgb(${scheme.labelTertiary}) !important;`,
+    `  --dsw-alias-label-caption: rgb(${scheme.labelCaption}) !important;`,
     // named surface aliases: fields sit one rung *below* the surface so a field reads as a field,
     // menus and tips one rung above.
+    // `--dsw-specific-input-major` 听起来像输入框，实测**不是**：DSH 里它给的是卡片、附件卡、
+    // 提示卡的背景（`.card` / `.fileCard` / `.notice`），真正那个 input 是 `background:0 0`（透明），
+    // 底由外层容器给。所以在这里改透明度，滑块当然“没反应”。保持原值，输入框的活交给下面的元素规则。
     `  --dsw-specific-input-major: ${role("well", 0.72)} !important;`,
-    `  --dsw-specific-login-input: ${role("well", 0.72)} !important;`,
     `  --dsw-specific-selector: ${role("well", 0.8)} !important;`,
     `  --dsw-specific-menu: ${role("surface", 0.9)} !important;`,
     `  --dsw-specific-tip: ${role("raised", 0.94)} !important;`,
@@ -1659,10 +1681,67 @@ function tokenLanguage(scheme: AccentScheme, mode: Mode): string {
     `  backdrop-filter: blur(20px) saturate(1.2) !important;`,
     `  -webkit-backdrop-filter: blur(20px) saturate(1.2) !important;`,
     `}`,
+    // 输入框单独一档：**直接画在控件身上**，不经过 DSH 的 token（见上面那条注释）。
+    // `background-color` + 自身圆角 = 不动布局、不会变成方块；`:not()` 放掉非文本控件。
+    // 变量由滑块直接写（拖拽时即时生效），没写时回退到设置值。
+    `body[${BODY_ATTR}][${ACCENT_ATTR}] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]):not([type="submit"]):not([type="button"]),`,
+    `body[${BODY_ATTR}][${ACCENT_ATTR}] textarea,`,
+    `body[${BODY_ATTR}][${ACCENT_ATTR}] select,`,
+    // 主输入区在 DSH 里是 `<div role="textbox" contenteditable>`，**不是 textarea**（CDP 实测）。
+    // 不写这一条，“文本框看不清”里最该管的那个框反而不在覆盖范围内。
+    `body[${BODY_ATTR}][${ACCENT_ATTR}] [contenteditable="true"],`,
+    `body[${BODY_ATTR}][${ACCENT_ATTR}] [role="textbox"] {`,
+    `  background-color: rgba(var(--dsh-skin-well, 236, 243, 250), var(--dsh-skin-input-alpha, ${scheme.inputAlpha.toFixed(3)})) !important;`,
+    `}`,
+    // 数字框 / 搜索框之类的小控件自己带圆角，但有的不带；补一个柔和的圆角，免得变成直角色块。
+    `body[${BODY_ATTR}][${ACCENT_ATTR}] input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),`,
+    `body[${BODY_ATTR}][${ACCENT_ATTR}] textarea,`,
+    `body[${BODY_ATTR}][${ACCENT_ATTR}] select {`,
+    `  border-radius: var(--dsw-radius-sm, 6px);`,
+    `}`,
   ].join("\n");
 }
 
-function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["light"], depth = 2): AccentScheme {
+interface SurfaceContext {
+  /** Mean luminance of the wallpaper, 0..1. */
+  artLum?: number;
+  /** Panel opacity, 0..1 — how much of the wallpaper the surface covers. */
+  panelAlpha?: number;
+  /** Field opacity, 0..1 — the inputOpacity setting. */
+  inputAlpha?: number;
+}
+
+/**
+ * Luminance of what actually sits behind the text: the wallpaper, veiled by a panel of
+ * `panelAlpha`. This is the number the whole readability pass hangs on — the old code compared
+ * text against the *panel colour with the wallpaper ignored*, i.e. it assumed an opaque panel.
+ * Exported so the offline test can pin the arithmetic.
+ */
+export function compositedSurfaceLum(artLum: number, panelAlpha: number, mode: Mode): number {
+  const clamp = (v: number) => Math.max(0, Math.min(1, Number.isFinite(v) ? v : 0));
+  const bg = mode === "dark" ? [18, 31, 47] : [255, 253, 252];
+  const bgLum = relativeLuminance(bg[0], bg[1], bg[2]);
+  const a = clamp(panelAlpha);
+  return clamp(artLum) * (1 - a) + bgLum * a;
+}
+
+/**
+ * 一个能读的文字色：从 startL 出发，沿着远离背景的方向走到达标为止。
+ * 方向由背景亮度决定（亮→变深，暗→变浅），不是由主题决定 —— 这样浅色主题撞上深色壁纸也救得回来。
+ * 导出给测试：截图里那行“看不见的小字”就是这里没走对比度。
+ */
+export function readableLabel(startL: number, surfaceLum: number, target: number, hue = 214): string {
+  const brighten = surfaceLum < 0.42;
+  const walked = fitLightness(hue, 0.05, startL, surfaceLum, target, brighten);
+  const [r, g, b] = hslTriple(hue, 0.05, walked);
+  if (CONTRAST(relativeLuminance(r, g, b), surfaceLum) >= target) return [r, g, b].join(", ");
+  // 黑字与白字的对比度在背景亮度 ≈0.18 附近交叉：只有那一条极窄的带里两者都低于 4.5，
+  // 其他任何亮度都有一个胜者。所以走到头还不够时，直接取纯黑/纯白 —— 那是这个背景允许的上限。
+  const blackWins = CONTRAST(0, surfaceLum) >= CONTRAST(1, surfaceLum);
+  return blackWins ? "0, 0, 0" : "255, 255, 255";
+}
+
+function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["light"], depth = 2, surface: SurfaceContext = {}): AccentScheme {
   const sampled = palette
     .slice(0, 6)
     .map((p) => {
@@ -1686,6 +1765,14 @@ function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["lig
 
   const bg = mode === "dark" ? [18, 31, 47] : [255, 253, 252];
   const bgLum = relativeLuminance(bg[0], bg[1], bg[2]);
+  // 文字要看的不是“面板色”，也不是“壁纸”，而是两者叠完之后的那个颜色。
+  // surfaceLum 就是它：壁纸亮度和面板色亮度按面板不透明度加权。之前用固定的 bg 算对比度，
+  // 相当于假定面板是不透明的 —— 一旦面板半透、背后又是一张亮壁纸，所有校验都白做了。
+  const artLum = Math.max(0, Math.min(1, surface.artLum ?? 0.5));
+  const panelAlpha = Math.max(0, Math.min(1, surface.panelAlpha ?? 1));
+  const surfaceLum = compositedSurfaceLum(artLum, panelAlpha, mode);
+  // 文字色：只走到达标为止（primary 7:1 / secondary 5:1 / 其余 4.5:1）。
+  const labelOn = (startL: number, target: number): string => readableLabel(startL, surfaceLum, target, hue);
   const lineL = fitLightness(hue, sat, mode === "dark" ? 0.64 : 0.44, bgLum, 2.3, mode === "dark");
   const inkL = fitLightness(hue, Math.min(0.72, sat + 0.12), mode === "dark" ? 0.82 : 0.32, bgLum, 4.6, mode === "dark");
   const washL = mode === "dark" ? 0.62 : 0.48;
@@ -1770,6 +1857,13 @@ function deriveScheme(palette: string[], mode: Mode, light?: ArtworkReading["lig
     spark: hslTriple(vivid?.h ?? hue, Math.min(0.85, (vivid?.s ?? sat) + 0.15), sparkL).join(", "),
     // 借光: the *colour of the light* the picture is lit by, not a colour from it.
     lightTint: (light?.warmth ?? 0) > 0.02 ? "255, 236, 205" : "214, 236, 255",
+    labelPrimary: labelOn(mode === "dark" ? 0.95 : 0.10, 7),
+    labelSecondary: labelOn(mode === "dark" ? 0.82 : 0.40, 5),
+    labelTertiary: labelOn(mode === "dark" ? 0.70 : 0.52, 4.5),
+    labelCaption: labelOn(mode === "dark" ? 0.66 : 0.56, 4.5),
+    // 输入框不允许彻底透明：0 会让字重新变回读不清 —— 那正是这个滑块要解决的问题。
+    // 下限 25% 保证「拖到最左也有一个看得见的底」，也让人一眼看出滑块确实在动。
+    inputAlpha: Math.max(0.25, Math.min(1, surface.inputAlpha ?? 0.95)),
   };
 }
 
@@ -1962,6 +2056,7 @@ let accentPreviewInputs: {
   reading: ArtworkReading | null | undefined;
   frameOpts: FrameOptions;
   colourStyle: ColourStyle;
+  surface: SurfaceContext;
 } | null = null;
 
 /**
@@ -1974,7 +2069,7 @@ export function previewAccentLevel(level: number): void {
   if (!inputs) return;
   try {
     const style = soleStyle(ACCENT_STYLE_ID);
-    style.textContent = accentCss(inputs.palette, level, inputs.mode, inputs.artUrl, inputs.reading, inputs.frameOpts, inputs.colourStyle);
+    style.textContent = accentCss(inputs.palette, level, inputs.mode, inputs.artUrl, inputs.reading, inputs.frameOpts, inputs.colourStyle, inputs.surface);
     document.body.setAttribute(ACCENT_ATTR, String(level));
   } catch {
     /* a preview must never break the panel */
@@ -1989,8 +2084,9 @@ function accentCss(
   reading?: ArtworkReading | null,
   frame: FrameOptions = { scale: 1, opacity: 1, controls: false },
   colourStyle: ColourStyle = "wash",
+  surface: SurfaceContext = {},
 ): string {
-  const scheme = deriveScheme(palette, mode, reading?.light, level);
+  const scheme = deriveScheme(palette, mode, reading?.light, level, surface);
   const root = `body[${BODY_ATTR}][${ACCENT_ATTR}]`;
   const small = `${root} [${ACCENT_MARK}="small"]`;
   const panel = `${root} [${ACCENT_MARK}="panel"]`;
@@ -2294,9 +2390,20 @@ async function applyAccent(value: SkinValue, mode: Mode, commit?: Commit, refres
       : await keyOutBackground(frameUrl)
     : frameUrl;
   const colourStyle = (String(value.accentMode ?? "wash") as ColourStyle) || "wash";
+  // 合成背景：壁纸的平均亮度 + 面板透明度。文字 token 和输入框档位都靠它 ——
+  // 这也是可读性那两条修正的地基（没有这个数，对比度就又只能对着“假设不透明的面板”算）。
+  const artLum =
+    reading && reading.density.length
+      ? reading.density.reduce((sum, cell) => sum + cell.lum, 0) / reading.density.length
+      : 0.5;
+  const surface: SurfaceContext = {
+    artLum,
+    panelAlpha: Math.max(0, Math.min(1, Number(value.panelOpacity ?? 100) / 100)),
+    inputAlpha: Math.max(0, Math.min(1, Number(value.inputOpacity ?? 95) / 100)),
+  };
   // Cache what the live preview needs, then paint the real sheet.
-  accentPreviewInputs = { palette, mode, artUrl, reading, frameOpts, colourStyle };
-  style.textContent = accentCss(palette, effective, mode, artUrl, reading, frameOpts, colourStyle);
+  accentPreviewInputs = { palette, mode, artUrl, reading, frameOpts, colourStyle, surface };
+  style.textContent = accentCss(palette, effective, mode, artUrl, reading, frameOpts, colourStyle, surface);
 }
 
 function disposeAccent(): void {
@@ -3061,6 +3168,156 @@ function formatMb(bytes: number): string {
   return (bytes / 1024 / 1024).toFixed(1);
 }
 
+// ── upload optimisation ─────────────────────────────────────────────────────
+//
+// The host stores whatever bytes it is given, and every area <img> decodes the full picture even
+// when it is painted 96px wide. A camera shot therefore costs ~8 MB of disk and a big decode on
+// every settings render. So the browser does the shrinking, before anything crosses the wire:
+// longest edge capped, re-encoded as WebP. No native dependency, no server-side image library.
+
+/** Longest edge kept for a stored upload. */
+export const UPLOAD_MAX_DIM = 2560;
+/** Below this size and within the cap, the original bytes are kept (a re-encode would only lose). */
+export const UPLOAD_KEEP_BYTES = 700 * 1024;
+/** Only formats a canvas can safely re-encode: an animated GIF would lose its animation (one frame). */
+const REENCODABLE = /^image\/(png|jpeg|webp|avif)$/i;
+
+/** Whether this upload is worth re-encoding. Exported so the offline test can pin the rule. */
+export function shouldOptimizeUpload(type: string, bytes: number, width: number, height: number): boolean {
+  if (!REENCODABLE.test(type)) return false;
+  if (Math.max(width, height) > UPLOAD_MAX_DIM) return true;
+  return bytes > UPLOAD_KEEP_BYTES;
+}
+
+function readAsDataUri(blob: Blob): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+interface PreparedUpload {
+  dataUri: string;
+  /** Human sentence describing the saving, or "" when the original bytes were kept. */
+  note: string;
+}
+
+/**
+ * Downscale + re-encode one upload. Every failure path returns the original file unchanged:
+ * an unoptimised upload is a small problem, a refused upload is a big one.
+ */
+async function prepareUpload(file: File): Promise<PreparedUpload> {
+  const untouched = async (): Promise<PreparedUpload> => ({ dataUri: await readAsDataUri(file), note: "" });
+  let bitmap: ImageBitmap | null = null;
+  try {
+    if (typeof createImageBitmap !== "function" || !REENCODABLE.test(file.type)) return untouched();
+    bitmap = await createImageBitmap(file);
+    const { width, height } = bitmap;
+    if (!shouldOptimizeUpload(file.type, file.size, width, height)) {
+      bitmap.close?.();
+      return untouched();
+    }
+    const scale = Math.min(1, UPLOAD_MAX_DIM / Math.max(width, height));
+    const targetWidth = Math.max(1, Math.round(width * scale));
+    const targetHeight = Math.max(1, Math.round(height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      bitmap.close?.();
+      return untouched();
+    }
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(bitmap, 0, 0, targetWidth, targetHeight);
+    bitmap.close?.();
+    bitmap = null;
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/webp", 0.88));
+    // A re-encode that grows the file is a loss on every axis; keep the original instead.
+    if (!blob || blob.size >= file.size) return untouched();
+    const saved = file.size - blob.size;
+    const percent = Math.round((saved / file.size) * 100);
+    return {
+      dataUri: await readAsDataUri(blob),
+      note: `${formatMb(file.size)} MB → ${formatMb(blob.size)} MB（省 ${percent}%）`,
+    };
+  } catch {
+    bitmap?.close?.();
+    return untouched();
+  }
+}
+
+// ── skin pack (export / import) ─────────────────────────────────────────────
+
+/** Download the whole skin as one JSON file. */
+async function exportSkinPack(): Promise<{ ok: true; files: number } | { ok: false; error: string }> {
+  try {
+    const resp = await fetch(`${ROUTE_PREFIX}/export`);
+    if (!resp.ok) return { ok: false, error: `导出失败（HTTP ${resp.status}）` };
+    const blob = await resp.blob();
+    const files = Number(resp.headers.get("x-dsh-skin-files") ?? "0") || 0;
+    const stamp = new Date().toISOString().slice(0, 10);
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = href;
+    link.download = `dsh-image-skin-${stamp}.pack.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 10_000);
+    return { ok: true, files };
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/**
+ * Restore a pack: the host lands the files and returns the settings, then we write only the
+ * fields that actually differ. Writing all ~60 fields would mean ~60 settings commits and 60
+ * full re-renders of the panel for a pack identical to what is already stored.
+ */
+async function importSkinPack(
+  file: File,
+  scope: Scope<SkinValue>,
+  current: SkinValue,
+): Promise<{ ok: boolean; message: string }> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await file.text());
+  } catch {
+    return { ok: false, message: "这个文件不是有效的 JSON" };
+  }
+  let resp: Response;
+  try {
+    resp = await fetch(`${ROUTE_PREFIX}/import`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(parsed),
+    });
+  } catch (error) {
+    return { ok: false, message: `连不上宿主：${error instanceof Error ? error.message : String(error)}` };
+  }
+  const data = (await resp.json().catch(() => null)) as
+    | { restored?: number; skipped?: number; rejected?: number; settings?: SkinValue; error?: string }
+    | null;
+  if (!resp.ok || !data) return { ok: false, message: data?.error ?? `导入失败（HTTP ${resp.status}）` };
+  const settings = data.settings ?? {};
+  let written = 0;
+  for (const [field, value] of Object.entries(settings)) {
+    if (JSON.stringify((current ?? {})[field]) === JSON.stringify(value)) continue;
+    await scope.set(field, value);
+    written++;
+  }
+  scheduleCollectUnused();
+  const files = `恢复 ${data.restored ?? 0} 个文件`;
+  const skipped = data.skipped ? `（${data.skipped} 个已存在，跳过）` : "";
+  const rej = data.rejected ? `，${data.rejected} 个无效项被拒绝` : "";
+  return { ok: true, message: `${files}${skipped}，写入 ${written} 项设置${rej}` };
+}
+
 /**
  * Accent level picker. A slider rather than four buttons, because the levels are ordered by
  * cost and the description changes with the level - so the caption cross-fades as you drag
@@ -3767,6 +4024,8 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
     const [editingId, setEditingId] = React.useState<string | null>(currentEditing);
     const [notice, setNotice] = React.useState<string | null>(null);
     const [gcStatus, setGcStatus] = React.useState<string | null>(null);
+    const [packStatus, setPackStatus] = React.useState<string | null>(null);
+    const packFile = React.useRef<HTMLInputElement | null>(null);
 
     // Every write to the host goes through here. A tab opened before a DSH restart keeps rendering
     // and keeps accepting clicks, but its token is dead - so writes fail and every control looks
@@ -3785,16 +4044,11 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
       }
       setBusy(field);
       try {
-        const dataUri = await new Promise<string>((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(String(reader.result));
-          reader.onerror = () => reject(reader.error);
-          reader.readAsDataURL(file);
-        });
+        const prepared = await prepareUpload(file);
         const resp = await fetch(`${ROUTE_PREFIX}/upload`, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ image: dataUri }),
+          body: JSON.stringify({ image: prepared.dataUri }),
         });
         const data = (await resp.json().catch(() => null)) as { url?: string; error?: string } | null;
         if (!resp.ok || !data?.url) {
@@ -3803,6 +4057,7 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
         }
         await scope.set(field, data.url);
         scheduleCollectUnused();
+        if (prepared.note) setNotice(`${file.name}：${prepared.note}`);
       } catch (error) {
         setNotice(error instanceof Error ? error.message : String(error));
         console.error("[dsh-image-skin] upload failed", error);
@@ -4127,6 +4382,24 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           onPreview: (n: number) => applyPanelOpacity({ ...v, panelOpacity: n }, mode),
           onCommit: (n: number) => apply("panelOpacity", n),
         }),
+        h(SliderRow, {
+          key: "inputOpacity",
+          title: "输入框不透明度",
+          hint: "输入框 / 下拉框 / 文本域单独一档 —— 面板可以很透，但你正在读、正在打的字要看得清",
+          value: Number(v.inputOpacity ?? 95),
+          min: 25,
+          max: 100,
+          step: 1,
+          format: (n: number) => `${n}%`,
+          // 拖动直接改 CSS 变量：即时生效，不用等整张染色表重建。
+          onPreview: (n: number) =>
+            document.body.style.setProperty("--dsh-skin-input-alpha", String(Math.max(0, Math.min(1, n / 100)))),
+          onCommit: (n: number) => {
+            apply("inputOpacity", n);
+            // 设置写入会触发一次全量重绘（带上新值），之后就交给样式表，把临时变量收回去。
+            window.setTimeout(() => document.body.style.removeProperty("--dsh-skin-input-alpha"), 1200);
+          },
+        }),
         h(
           "div",
           { className: "dshImgSkin-row" },
@@ -4220,6 +4493,79 @@ function createSection(scope: Scope<SkinValue>, modeStore: ModeStore): () => Rea
           ),
         ),
         gcStatus ? h("p", { className: "dshImgSkin-ok" }, gcStatus) : null,
+      ),
+      h(
+        "div",
+        { className: "dshImgSkin-card" },
+        h(
+          "div",
+          { className: "dshImgSkin-cardhead" },
+          h(
+            "div",
+            null,
+            h("span", { className: "dshImgSkin-title" }, t("皮肤包", "Skin pack")),
+            h(
+              "p",
+              { className: "dshImgSkin-sub" },
+              t(
+                "把这套皮肤（图片 + 全部设置）导出成一个文件：备份、换电脑、送给朋友都行。导入会补齐缺的图，并覆盖当前的皮肤设置——API Key 不会进包，也不会被覆盖。",
+                "Export this whole skin (images + every setting) as one file: back it up, move machines, or hand it to a friend. Import restores missing images and replaces the current skin settings. API keys never travel in a pack and are never overwritten.",
+              ),
+            ),
+          ),
+          h(
+            "div",
+            { className: "dshImgSkin-packrow" },
+            h(
+              "button",
+              {
+                className: "dshImgSkin-btn",
+                onClick: () => {
+                  void (async () => {
+                    setPackStatus(t("导出中…", "Exporting…"));
+                    const result = await exportSkinPack();
+                    setPackStatus("error" in result ? result.error : `已导出，含 ${result.files} 个文件`);
+                  })();
+                },
+              },
+              t("导出", "Export"),
+            ),
+            h(
+              "button",
+              { className: "dshImgSkin-btn", onClick: () => packFile.current?.click() },
+              t("导入", "Import"),
+            ),
+            h("input", {
+              ref: packFile,
+              type: "file",
+              accept: ".json,application/json",
+              style: { display: "none" },
+              onChange: (e: any) => {
+                const picked = e.target.files?.[0] as File | undefined;
+                e.target.value = "";
+                if (!picked) return;
+                // Importing replaces the skin settings wholesale, so ask first - the same courtesy
+                // the cleanup button gets. Stored images are only added, never deleted.
+                if (
+                  !window.confirm(
+                    t(
+                      "导入会覆盖当前的图片皮肤设置（图片文件只补不删）。继续？",
+                      "Import replaces the current skin settings (stored images are added, never deleted). Continue?",
+                    ),
+                  )
+                ) {
+                  return;
+                }
+                void (async () => {
+                  setPackStatus(t("导入中…", "Importing…"));
+                  const result = await importSkinPack(picked, scope, v);
+                  setPackStatus(result.message);
+                })();
+              },
+            }),
+          ),
+        ),
+        packStatus ? h("p", { className: "dshImgSkin-ok" }, packStatus) : null,
       ),
     );
 
